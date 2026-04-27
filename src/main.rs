@@ -23,9 +23,9 @@ use crate::cookies::{CookieFormat, parse_cookies};
 use crate::db::Database;
 use crate::install::require_obscura;
 use crate::models::{
-    CreateProfileRequest, CreateSessionRequest, DumpFormat, DumpSessionRequest,
-    EvaluateSessionRequest, NavigateSessionRequest, ProfileIdentity, ProfileMode,
-    UpdateProfileRequest, ViewportConfig,
+    CliStatusResponse, ConfiguredRole, CreateProfileRequest, CreateSessionRequest, DumpFormat,
+    DumpSessionRequest, EvaluateSessionRequest, NavigateSessionRequest, ProfileIdentity,
+    ProfileMode, ServerStatusResponse, StatusSource, UpdateProfileRequest, ViewportConfig,
 };
 use crate::server::{AppState, app};
 
@@ -41,6 +41,7 @@ struct Cli {
 enum Commands {
     Setup,
     Run,
+    Status,
     Config(ConfigCommand),
     Session(SessionCommand),
     Profile(ProfileCommand),
@@ -285,6 +286,11 @@ async fn main() -> Result<()> {
             config.validate_paths(&paths)?;
             require_obscura(&config)?;
             let db = Database::open(&paths.database_file)?;
+            let failed =
+                db.mark_active_sessions_failed("gateway restarted before session recovery")?;
+            if failed > 0 {
+                tracing::warn!(failed, "marked stale sessions as failed during startup");
+            }
             let gateway = Arc::new(Gateway::new(paths.clone(), config.clone(), db));
             let listener = TcpListener::bind(&config.listen_addr).await?;
             let state = AppState { gateway };
@@ -306,6 +312,10 @@ async fn handle_remote_command(
 ) -> Result<()> {
     let client = reqwest::Client::builder().build()?;
     match command {
+        Commands::Status => {
+            let status = collect_status(&client, paths, config).await?;
+            print_json(&status);
+        }
         Commands::Config(cmd) => match cmd.command {
             ConfigSubcommand::SetServerUrl { value } => {
                 let updated = rewrite_config_file(paths, |cfg| cfg.set_server_url(value.clone()))?;
@@ -368,7 +378,7 @@ async fn handle_remote_command(
                 proxy_policy,
             } => {
                 let response = client
-                    .post(format!("{}/v1/sessions", config.server_url))
+                    .post(api_url(config, "/v1/sessions"))
                     .bearer_auth(&config.api_key)
                     .json(&CreateSessionRequest {
                         tenant_id,
@@ -398,7 +408,7 @@ async fn handle_remote_command(
                 let response = client
                     .post(format!(
                         "{}/v1/sessions/{id}/actions/navigate",
-                        config.server_url
+                        api_base(config)
                     ))
                     .bearer_auth(&config.api_key)
                     .json(&NavigateSessionRequest {
@@ -417,7 +427,7 @@ async fn handle_remote_command(
                 let response = client
                     .post(format!(
                         "{}/v1/sessions/{id}/actions/eval",
-                        config.server_url
+                        api_base(config)
                     ))
                     .bearer_auth(&config.api_key)
                     .json(&EvaluateSessionRequest { expression })
@@ -432,7 +442,7 @@ async fn handle_remote_command(
                 let body = client
                     .post(format!(
                         "{}/v1/sessions/{id}/actions/dump",
-                        config.server_url
+                        api_base(config)
                     ))
                     .bearer_auth(&config.api_key)
                     .json(&DumpSessionRequest {
@@ -447,7 +457,7 @@ async fn handle_remote_command(
             }
             SessionSubcommand::Close { id } => {
                 let response = client
-                    .delete(format!("{}/v1/sessions/{id}", config.server_url))
+                    .delete(format!("{}/v1/sessions/{id}", api_base(config)))
                     .bearer_auth(&config.api_key)
                     .send()
                     .await?
@@ -471,7 +481,7 @@ async fn handle_remote_command(
                 proxy_affinity,
             } => {
                 let response = client
-                    .post(format!("{}/v1/profiles", config.server_url))
+                    .post(api_url(config, "/v1/profiles"))
                     .bearer_auth(&config.api_key)
                     .json(&CreateProfileRequest {
                         name,
@@ -511,7 +521,7 @@ async fn handle_remote_command(
                 proxy_affinity,
             } => {
                 let response = client
-                    .patch(format!("{}/v1/profiles/{id}", config.server_url))
+                    .patch(format!("{}/v1/profiles/{id}", api_base(config)))
                     .bearer_auth(&config.api_key)
                     .json(&UpdateProfileRequest {
                         description,
@@ -535,7 +545,7 @@ async fn handle_remote_command(
             }
             ProfileSubcommand::Delete { id } => {
                 client
-                    .delete(format!("{}/v1/profiles/{id}", config.server_url))
+                    .delete(format!("{}/v1/profiles/{id}", api_base(config)))
                     .bearer_auth(&config.api_key)
                     .send()
                     .await?
@@ -568,7 +578,7 @@ async fn handle_remote_command(
                 let response = client
                     .post(format!(
                         "{}/v1/profiles/{profile}/cookies:import",
-                        config.server_url
+                        api_base(config)
                     ))
                     .bearer_auth(&config.api_key)
                     .multipart(form)
@@ -587,7 +597,7 @@ async fn handle_remote_command(
                 let body = client
                     .get(format!(
                         "{}/v1/profiles/{profile}/cookies:export?format={format}",
-                        config.server_url
+                        api_base(config)
                     ))
                     .bearer_auth(&config.api_key)
                     .send()
@@ -608,7 +618,7 @@ async fn handle_remote_command(
         Commands::Grant(cmd) => match cmd.command {
             GrantSubcommand::Cdp { id } => {
                 let response = client
-                    .post(format!("{}/v1/sessions/{id}/grants/cdp", config.server_url))
+                    .post(format!("{}/v1/sessions/{id}/grants/cdp", api_base(config)))
                     .bearer_auth(&config.api_key)
                     .send()
                     .await?
@@ -626,7 +636,7 @@ async fn handle_remote_command(
         Commands::Events(cmd) => match cmd.command {
             EventsSubcommand::Tail { id } => {
                 let response = client
-                    .get(format!("{}/v1/sessions/{id}/events", config.server_url))
+                    .get(format!("{}/v1/sessions/{id}/events", api_base(config)))
                     .bearer_auth(&config.api_key)
                     .send()
                     .await?
@@ -644,7 +654,7 @@ async fn handle_remote_command(
 
 async fn get_and_print(client: &reqwest::Client, config: &AppConfig, path: &str) -> Result<()> {
     let response = client
-        .get(format!("{}{}", config.server_url, path))
+        .get(api_url(config, path))
         .bearer_auth(&config.api_key)
         .send()
         .await?
@@ -657,6 +667,96 @@ async fn get_and_print(client: &reqwest::Client, config: &AppConfig, path: &str)
 
 fn print_json<T: Serialize>(value: &T) {
     println!("{}", serde_json::to_string_pretty(value).unwrap());
+}
+
+async fn collect_status(
+    client: &reqwest::Client,
+    paths: &AppPaths,
+    config: &AppConfig,
+) -> Result<CliStatusResponse> {
+    let configured_role = if is_server_mode(config) {
+        ConfiguredRole::Server
+    } else {
+        ConfiguredRole::Cli
+    };
+
+    if matches!(configured_role, ConfiguredRole::Server) {
+        let db = Database::open(&paths.database_file)?;
+        let server = ServerStatusResponse {
+            listen_addr: config.listen_addr.clone(),
+            obscura_bin: config.obscura_bin.display().to_string(),
+            default_proxy_policy: config.default_proxy_policy.clone(),
+            proxy_policies: config.proxy_policies.len(),
+            saved_profiles: db.profiles_count()?,
+            total_sessions: db.total_sessions_count()?,
+            active_sessions: db.active_sessions_count()?,
+        };
+        return Ok(CliStatusResponse {
+            configured_role,
+            status_source: StatusSource::Local,
+            config_root: paths.root.display().to_string(),
+            server_url: config.server_url.clone(),
+            listen_addr: config.listen_addr.clone(),
+            api_key_configured: !config.api_key.is_empty(),
+            server_reachable: is_local_server_reachable(client, config).await,
+            server: Some(server),
+        });
+    }
+
+    match fetch_remote_status(client, config).await {
+        Ok(server) => Ok(CliStatusResponse {
+            configured_role,
+            status_source: StatusSource::Remote,
+            config_root: paths.root.display().to_string(),
+            server_url: config.server_url.clone(),
+            listen_addr: config.listen_addr.clone(),
+            api_key_configured: !config.api_key.is_empty(),
+            server_reachable: true,
+            server: Some(server),
+        }),
+        Err(_) => Ok(CliStatusResponse {
+            configured_role,
+            status_source: StatusSource::ConfigOnly,
+            config_root: paths.root.display().to_string(),
+            server_url: config.server_url.clone(),
+            listen_addr: config.listen_addr.clone(),
+            api_key_configured: !config.api_key.is_empty(),
+            server_reachable: false,
+            server: None,
+        }),
+    }
+}
+
+async fn fetch_remote_status(
+    client: &reqwest::Client,
+    config: &AppConfig,
+) -> Result<ServerStatusResponse> {
+    client
+        .get(api_url(config, "/v1/status"))
+        .bearer_auth(&config.api_key)
+        .send()
+        .await?
+        .error_for_status()?
+        .json::<ServerStatusResponse>()
+        .await
+        .context("failed to decode server status")
+}
+
+async fn is_local_server_reachable(client: &reqwest::Client, config: &AppConfig) -> bool {
+    fetch_remote_status(client, config).await.is_ok()
+}
+
+fn is_server_mode(config: &AppConfig) -> bool {
+    let normalized_server_url = config.server_url.trim_end_matches('/');
+    normalized_server_url == format!("http://{}", config.listen_addr)
+}
+
+fn api_base(config: &AppConfig) -> &str {
+    config.server_url.trim_end_matches('/')
+}
+
+fn api_url(config: &AppConfig, path: &str) -> String {
+    format!("{}{}", api_base(config), path)
 }
 
 fn parse_cookie_format(value: &str) -> Result<CookieFormat> {

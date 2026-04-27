@@ -2,6 +2,23 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
+pub const MAX_CONCURRENT_SESSIONS: usize = 25;
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ConfiguredRole {
+    Server,
+    Cli,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum StatusSource {
+    Local,
+    Remote,
+    ConfigOnly,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct SessionRecord {
     pub session_id: String,
@@ -182,6 +199,29 @@ pub struct QuotasResponse {
     pub max_concurrent_sessions: usize,
     pub active_sessions: usize,
     pub profiles: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct ServerStatusResponse {
+    pub listen_addr: String,
+    pub obscura_bin: String,
+    pub default_proxy_policy: String,
+    pub proxy_policies: usize,
+    pub saved_profiles: usize,
+    pub total_sessions: usize,
+    pub active_sessions: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct CliStatusResponse {
+    pub configured_role: ConfiguredRole,
+    pub status_source: StatusSource,
+    pub config_root: String,
+    pub server_url: String,
+    pub listen_addr: String,
+    pub api_key_configured: bool,
+    pub server_reachable: bool,
+    pub server: Option<ServerStatusResponse>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]

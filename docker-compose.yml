@@ -1,0 +1,20 @@
+services:
+  obscura-gateway:
+    build:
+      context: .
+      args:
+        OBSCURA_VERSION: v0.1.1
+    image: obscura-gateway:local
+    environment:
+      OBSCURA_GATEWAY_LISTEN_ADDR: 0.0.0.0:18789
+      OBSCURA_GATEWAY_SERVER_URL: http://localhost:18789
+      # Set a stable secret in production. If omitted, setup generates one in the state volume.
+      # OBSCURA_GATEWAY_API_KEY: change-me
+    ports:
+      - "18789:18789"
+    volumes:
+      - obscura-gateway-state:/data/.obscura-gateway
+    restart: unless-stopped
+
+volumes:
+  obscura-gateway-state:

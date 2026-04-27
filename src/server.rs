@@ -19,9 +19,9 @@ use crate::gateway::{Gateway, write_bytes};
 use crate::models::{
     ArtifactEntry, CreateProfileRequest, CreateSessionRequest, DumpFormat, DumpLink,
     DumpSessionRequest, DumpSessionResponse, EvaluateSessionRequest, EvaluateSessionResponse,
-    GatewayEvent, GrantResponse, NavigateSessionRequest, NavigateSessionResponse,
-    ProfileCookiesImportResponse, ProfileRecord, QuotasResponse, SessionRecord,
-    UpdateProfileRequest,
+    GatewayEvent, GrantResponse, MAX_CONCURRENT_SESSIONS, NavigateSessionRequest,
+    NavigateSessionResponse, ProfileCookiesImportResponse, ProfileRecord, QuotasResponse,
+    ServerStatusResponse, SessionRecord, UpdateProfileRequest,
 };
 
 #[derive(Clone)]
@@ -45,6 +45,7 @@ pub struct AppState {
         get_profile,
         update_profile,
         delete_profile,
+        status,
         list_artifacts,
         quotas
     ),
@@ -66,6 +67,7 @@ pub struct AppState {
             UpdateProfileRequest,
             GrantResponse,
             QuotasResponse,
+            ServerStatusResponse,
             ProfileCookiesImportResponse,
             GatewayEvent
         )
@@ -80,6 +82,7 @@ pub fn app(state: AppState) -> Router {
     Router::new()
         .route("/healthz", get(healthz))
         .route("/openapi.json", get(openapi))
+        .route("/v1/status", get(status))
         .route("/v1/quotas", get(quotas))
         .route("/v1/sessions", post(create_session).get(list_sessions))
         .route("/v1/sessions/{id}", get(get_session).delete(delete_session))
@@ -122,6 +125,40 @@ async fn healthz() -> impl IntoResponse {
 
 async fn openapi() -> impl IntoResponse {
     Json(ApiDoc::openapi())
+}
+
+#[utoipa::path(get, path = "/v1/status", responses((status = 200, body = ServerStatusResponse)), tag = "gateway")]
+async fn status(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<ServerStatusResponse>, StatusCode> {
+    let config = state.gateway.config.read().await.clone();
+    require_auth(&headers, &config)?;
+    let obscura_bin = config.obscura_bin.display().to_string();
+    let saved_profiles = state
+        .gateway
+        .db
+        .profiles_count()
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let total_sessions = state
+        .gateway
+        .db
+        .total_sessions_count()
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let active_sessions = state
+        .gateway
+        .db
+        .active_sessions_count()
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(Json(ServerStatusResponse {
+        listen_addr: config.listen_addr,
+        obscura_bin,
+        default_proxy_policy: config.default_proxy_policy,
+        proxy_policies: config.proxy_policies.len(),
+        saved_profiles,
+        total_sessions,
+        active_sessions,
+    }))
 }
 
 #[utoipa::path(post, path = "/v1/sessions", request_body = CreateSessionRequest, responses((status = 200, body = SessionRecord)), tag = "gateway")]
@@ -266,7 +303,7 @@ async fn list_artifacts(
         .gateway
         .list_artifacts(&id)
         .map(Json)
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
+        .map_err(|_| StatusCode::NOT_FOUND)
 }
 
 async fn session_events(
@@ -362,7 +399,7 @@ async fn update_profile(
         .map_err(|_| StatusCode::BAD_REQUEST)
 }
 
-#[utoipa::path(delete, path = "/v1/profiles/{id}", responses((status = 200)), tag = "gateway")]
+#[utoipa::path(delete, path = "/v1/profiles/{id}", responses((status = 204)), tag = "gateway")]
 async fn delete_profile(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -372,8 +409,8 @@ async fn delete_profile(
     require_auth(&headers, &config)?;
     state
         .gateway
-        .db
         .delete_profile(&id)
+        .await
         .map(|_| StatusCode::NO_CONTENT)
         .map_err(|_| StatusCode::BAD_REQUEST)
 }
@@ -403,18 +440,18 @@ async fn import_cookies(
     let format = detect_format_from_name(file_name.as_deref());
     let cookies = parse_cookies(&raw, format).map_err(|_| StatusCode::BAD_REQUEST)?;
     validate_non_empty(&cookies).map_err(|_| StatusCode::BAD_REQUEST)?;
+    let response = state
+        .gateway
+        .import_profile_cookies(&id, &cookies)
+        .await
+        .map_err(|_| StatusCode::BAD_REQUEST)?;
     let artifact_path = state
         .gateway
         .paths
         .profile_dir(&id)
         .join("last-cookie-import");
     write_bytes(&artifact_path, raw.as_bytes()).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    state
-        .gateway
-        .import_profile_cookies(&id, &cookies)
-        .await
-        .map(Json)
-        .map_err(|_| StatusCode::BAD_REQUEST)
+    Ok(Json(response))
 }
 
 #[derive(serde::Deserialize, ToSchema)]
@@ -455,7 +492,7 @@ async fn quotas(
     let config = state.gateway.config.read().await.clone();
     require_auth(&headers, &config)?;
     Ok(Json(QuotasResponse {
-        max_concurrent_sessions: 25,
+        max_concurrent_sessions: MAX_CONCURRENT_SESSIONS,
         active_sessions: state
             .gateway
             .db
@@ -464,9 +501,8 @@ async fn quotas(
         profiles: state
             .gateway
             .db
-            .list_profiles()
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-            .len(),
+            .profiles_count()
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?,
     }))
 }
 
@@ -478,10 +514,10 @@ struct GrantQuery {
 async fn cdp_proxy(
     ws: WebSocketUpgrade,
     State(state): State<AppState>,
-    Path(_id): Path<String>,
+    Path(id): Path<String>,
     Query(query): Query<GrantQuery>,
 ) -> impl IntoResponse {
     ws.on_upgrade(move |socket| async move {
-        let _ = state.gateway.proxy_cdp(&query.grant, socket).await;
+        let _ = state.gateway.proxy_cdp(&id, &query.grant, socket).await;
     })
 }

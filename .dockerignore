@@ -1,0 +1,8 @@
+target/
+.git/
+.gitignore
+Dockerfile
+docker-compose*.yml
+*.log
+.env
+.obscura-gateway/

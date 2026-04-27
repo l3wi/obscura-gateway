@@ -15,8 +15,9 @@ use serde_json::Value;
 use sha2::Sha256;
 use tokio::process::{Child, Command};
 use tokio::sync::{Mutex, RwLock, broadcast};
-use tokio::time::{Duration as TokioDuration, Instant, sleep};
+use tokio::time::{Duration as TokioDuration, Instant, sleep, timeout};
 use tokio_tungstenite::{connect_async, tungstenite::Message as TungsteniteMessage};
+use url::Url;
 use uuid::Uuid;
 use walkdir::WalkDir;
 
@@ -26,9 +27,9 @@ use crate::db::Database;
 use crate::models::{
     ArtifactEntry, CdpGrantRecord, CreateProfileRequest, CreateSessionRequest, DumpFormat,
     DumpLink, DumpSessionResponse, EvaluateSessionRequest, EvaluateSessionResponse, GatewayEvent,
-    GrantResponse, NavigateSessionRequest, NavigateSessionResponse, ProfileCookiesImportResponse,
-    ProfileIdentity, ProfileMode, ProfileRecord, SessionRecord, SessionRuntime, SessionState,
-    StoredCookie,
+    GrantResponse, MAX_CONCURRENT_SESSIONS, NavigateSessionRequest, NavigateSessionResponse,
+    ProfileCookiesImportResponse, ProfileIdentity, ProfileMode, ProfileRecord, SessionRecord,
+    SessionRuntime, SessionState, StoredCookie,
 };
 
 type HmacSha256 = Hmac<Sha256>;
@@ -97,6 +98,22 @@ impl Gateway {
         self.db.get_profile(profile_id)
     }
 
+    pub async fn delete_profile(&self, profile_id: &str) -> Result<()> {
+        let _ = self.db.get_profile(profile_id)?;
+        let active_sessions = self.db.active_sessions_for_profile(profile_id)?;
+        if !active_sessions.is_empty() {
+            bail!(
+                "cannot delete profile while {} active session(s) are attached",
+                active_sessions.len()
+            );
+        }
+        self.db.delete_profile(profile_id)?;
+        let _ = fs::remove_dir_all(self.paths.profile_dir(profile_id));
+        let _ = fs::remove_file(self.paths.profile_json_cookie_path(profile_id));
+        let _ = fs::remove_file(self.paths.profile_netscape_cookie_path(profile_id));
+        Ok(())
+    }
+
     pub async fn import_profile_cookies(
         &self,
         profile_id: &str,
@@ -150,6 +167,10 @@ impl Gateway {
 
     pub async fn create_session(&self, request: CreateSessionRequest) -> Result<SessionRecord> {
         let config = self.config.read().await.clone();
+        let active_sessions = self.db.active_sessions_count()?;
+        if active_sessions >= MAX_CONCURRENT_SESSIONS {
+            bail!("maximum concurrent sessions reached: {MAX_CONCURRENT_SESSIONS}");
+        }
         if !request.allowed_domains.is_empty() && !request.denied_domains.is_empty() {
             for denied in &request.denied_domains {
                 if request.allowed_domains.contains(denied) {
@@ -196,18 +217,24 @@ impl Gateway {
             .arg("serve")
             .arg("--port")
             .arg(listener_port.to_string())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
         if let Some(proxy_url) = &resolved_proxy_url {
             command.arg("--proxy").arg(proxy_url);
         }
-        let child = command.spawn().with_context(|| {
+        let mut child = command.spawn().with_context(|| {
             format!(
                 "failed to launch obscura child at {}",
                 config.obscura_bin.display()
             )
         })?;
         let child_pid = child.id().unwrap_or_default();
+        if let Err(err) = wait_for_cdp_endpoint(&local_ws_url, 10).await {
+            let _ = child.kill().await;
+            return Err(err).with_context(|| {
+                format!("obscura child on port {listener_port} did not expose CDP")
+            });
+        }
         let runtime = SessionRuntime {
             session_id: session_id.clone(),
             child_pid,
@@ -232,7 +259,10 @@ impl Gateway {
             denied_domains: request.denied_domains,
             close_reason: None,
         };
-        self.db.insert_session(&record)?;
+        if let Err(err) = self.db.insert_session(&record) {
+            let _ = child.kill().await;
+            return Err(err);
+        }
         self.runtimes.lock().await.insert(
             session_id.clone(),
             ManagedSession {
@@ -317,7 +347,7 @@ impl Gateway {
             grant_id,
             ws_url: format!(
                 "{}/v1/cdp/{session_id}?grant={token}",
-                public_base.trim_end_matches('/')
+                websocket_base_url(public_base)?.trim_end_matches('/')
             ),
             expires_at,
         })
@@ -328,6 +358,8 @@ impl Gateway {
         session_id: &str,
         request: NavigateSessionRequest,
     ) -> Result<NavigateSessionResponse> {
+        self.ensure_navigation_allowed(session_id, &request.url)
+            .await?;
         let runtime = self.get_runtime(session_id).await?;
         let target_id = self.ensure_target(session_id).await?;
         let identity = self.profile_identity_for_session(session_id)?;
@@ -447,8 +479,8 @@ impl Gateway {
         Ok(response)
     }
 
-    pub async fn proxy_cdp(&self, token: &str, socket: WebSocket) -> Result<()> {
-        let grant = self.db.use_grant(token)?;
+    pub async fn proxy_cdp(&self, session_id: &str, token: &str, socket: WebSocket) -> Result<()> {
+        let grant = self.db.use_grant(token, session_id)?;
         let session = self.db.get_session(&grant.session_id)?;
         let target = session
             .cdp_ws_url
@@ -543,6 +575,7 @@ impl Gateway {
     }
 
     pub fn list_artifacts(&self, session_id: &str) -> Result<Vec<ArtifactEntry>> {
+        let _ = self.db.get_session(session_id)?;
         let root = self.paths.session_artifact_dir(session_id);
         if !root.exists() {
             return Ok(Vec::new());
@@ -766,6 +799,43 @@ impl Gateway {
             None => Ok(None),
         }
     }
+
+    async fn ensure_navigation_allowed(&self, session_id: &str, url: &str) -> Result<()> {
+        let session = self.db.get_session(session_id)?;
+        let config = self.config.read().await.clone();
+        let parsed = Url::parse(url).with_context(|| format!("invalid navigation URL: {url}"))?;
+        let host = parsed
+            .host_str()
+            .map(|value| value.trim_end_matches('.').to_ascii_lowercase());
+
+        let mut allowed_domains = config.default_domain_policy.allowlist;
+        allowed_domains.extend(session.allowed_domains);
+        let mut denied_domains = config.default_domain_policy.denylist;
+        denied_domains.extend(session.denied_domains);
+
+        if let Some(host) = &host {
+            if denied_domains
+                .iter()
+                .any(|domain| domain_matches(host, domain))
+            {
+                bail!("navigation host is denied by policy: {host}");
+            }
+            if !allowed_domains.is_empty()
+                && !allowed_domains
+                    .iter()
+                    .any(|domain| domain_matches(host, domain))
+            {
+                bail!("navigation host is not allowed by policy: {host}");
+            }
+            return Ok(());
+        }
+
+        if allowed_domains.is_empty() {
+            Ok(())
+        } else {
+            bail!("navigation URL must include a host when allowlist policy is configured")
+        }
+    }
 }
 
 pub fn write_bytes(path: &Path, bytes: &[u8]) -> Result<()> {
@@ -779,6 +849,66 @@ pub fn write_bytes(path: &Path, bytes: &[u8]) -> Result<()> {
 fn pick_free_port() -> Result<u16> {
     let listener = TcpListener::bind("127.0.0.1:0")?;
     Ok(listener.local_addr()?.port())
+}
+
+fn websocket_base_url(public_base: &str) -> Result<String> {
+    let mut url = Url::parse(public_base).context("server_url must be an absolute URL")?;
+    match url.scheme() {
+        "http" => url
+            .set_scheme("ws")
+            .map_err(|_| anyhow!("invalid ws URL scheme"))?,
+        "https" => url
+            .set_scheme("wss")
+            .map_err(|_| anyhow!("invalid wss URL scheme"))?,
+        "ws" | "wss" => {}
+        other => bail!("unsupported server_url scheme for WebSocket grant: {other}"),
+    }
+    Ok(url.to_string())
+}
+
+fn domain_matches(host: &str, rule: &str) -> bool {
+    let rule = normalize_domain_rule(rule);
+    !rule.is_empty() && (host == rule || host.ends_with(&format!(".{rule}")))
+}
+
+fn normalize_domain_rule(rule: &str) -> String {
+    let trimmed = rule
+        .trim()
+        .trim_start_matches("*.")
+        .trim_start_matches('.')
+        .trim_end_matches('.')
+        .to_ascii_lowercase();
+    if let Ok(url) = Url::parse(&trimmed) {
+        return url
+            .host_str()
+            .unwrap_or_default()
+            .trim_end_matches('.')
+            .to_ascii_lowercase();
+    }
+    if let Ok(url) = Url::parse(&format!("https://{trimmed}")) {
+        return url
+            .host_str()
+            .unwrap_or_default()
+            .trim_end_matches('.')
+            .to_ascii_lowercase();
+    }
+    trimmed
+}
+
+async fn wait_for_cdp_endpoint(ws_url: &str, timeout_secs: u64) -> Result<()> {
+    let deadline = Instant::now() + TokioDuration::from_secs(timeout_secs.max(1));
+    loop {
+        if let Ok(Ok((mut stream, _))) =
+            timeout(TokioDuration::from_millis(750), connect_async(ws_url)).await
+        {
+            let _ = stream.close(None).await;
+            return Ok(());
+        }
+        if Instant::now() >= deadline {
+            bail!("timed out waiting for CDP websocket at {ws_url}");
+        }
+        sleep(TokioDuration::from_millis(100)).await;
+    }
 }
 
 fn sign_token(secret: &str, payload: &str) -> Result<String> {
@@ -882,5 +1012,34 @@ async fn wait_for_ready_state(
             bail!("timed out waiting for {wait_until}");
         }
         sleep(TokioDuration::from_millis(200)).await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn websocket_base_url_uses_websocket_schemes() {
+        assert_eq!(
+            websocket_base_url("http://127.0.0.1:18789").unwrap(),
+            "ws://127.0.0.1:18789/"
+        );
+        assert_eq!(
+            websocket_base_url("https://gw.example.com/base/").unwrap(),
+            "wss://gw.example.com/base/"
+        );
+    }
+
+    #[test]
+    fn domain_rules_match_exact_and_subdomains_only() {
+        assert!(domain_matches("example.com", "example.com"));
+        assert!(domain_matches("www.example.com", "*.example.com"));
+        assert!(domain_matches(
+            "www.example.com",
+            "https://example.com/path"
+        ));
+        assert!(!domain_matches("badexample.com", "example.com"));
+        assert!(!domain_matches("example.org", "example.com"));
     }
 }

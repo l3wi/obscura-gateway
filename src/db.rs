@@ -179,6 +179,12 @@ impl Database {
         .ok_or_else(|| anyhow!("profile not found"))
     }
 
+    pub fn profiles_count(&self) -> Result<usize> {
+        let conn = self.conn.lock().map_err(|_| anyhow!("db mutex poisoned"))?;
+        let count: i64 = conn.query_row("select count(*) from profiles", [], |row| row.get(0))?;
+        Ok(count as usize)
+    }
+
     pub fn delete_profile(&self, profile_id: &str) -> Result<()> {
         let conn = self.conn.lock().map_err(|_| anyhow!("db mutex poisoned"))?;
         conn.execute("delete from profiles where profile_id = ?1", [profile_id])?;
@@ -246,6 +252,12 @@ impl Database {
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
+    pub fn total_sessions_count(&self) -> Result<usize> {
+        let conn = self.conn.lock().map_err(|_| anyhow!("db mutex poisoned"))?;
+        let count: i64 = conn.query_row("select count(*) from sessions", [], |row| row.get(0))?;
+        Ok(count as usize)
+    }
+
     pub fn active_sessions_count(&self) -> Result<usize> {
         let conn = self.conn.lock().map_err(|_| anyhow!("db mutex poisoned"))?;
         let count: i64 = conn.query_row(
@@ -254,6 +266,21 @@ impl Database {
             |row| row.get(0),
         )?;
         Ok(count as usize)
+    }
+
+    pub fn mark_active_sessions_failed(&self, reason: &str) -> Result<usize> {
+        let conn = self.conn.lock().map_err(|_| anyhow!("db mutex poisoned"))?;
+        let updated = conn.execute(
+            "update sessions
+             set state = '\"failed\"',
+                 child_pid = null,
+                 cdp_ws_url = null,
+                 close_reason = ?1,
+                 updated_at = ?2
+             where state in ('\"provisioning\"','\"ready\"','\"attached\"','\"idle\"','\"closing\"')",
+            params![reason, Utc::now().to_rfc3339()],
+        )?;
+        Ok(updated)
     }
 
     pub fn get_session(&self, session_id: &str) -> Result<SessionRecord> {
@@ -295,7 +322,7 @@ impl Database {
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
-    pub fn use_grant(&self, token: &str) -> Result<CdpGrantRecord> {
+    pub fn use_grant(&self, token: &str, expected_session_id: &str) -> Result<CdpGrantRecord> {
         let conn = self.conn.lock().map_err(|_| anyhow!("db mutex poisoned"))?;
         let grant = conn
             .query_row(
@@ -305,6 +332,9 @@ impl Database {
             )
             .optional()?
             .ok_or_else(|| anyhow!("grant not found"))?;
+        if grant.session_id != expected_session_id {
+            bail!("grant does not belong to requested session");
+        }
         if grant.used_at.is_some() {
             bail!("grant already used");
         }
