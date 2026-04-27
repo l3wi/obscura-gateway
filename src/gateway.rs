@@ -295,7 +295,19 @@ impl Gateway {
         if let Some(profile_id) = &request.profile_id {
             let cookies = self.export_profile_cookies(profile_id).await?;
             if !cookies.is_empty() {
-                self.inject_cookies(&runtime.local_ws_url, &cookies).await?;
+                if let Err(err) = self.inject_cookies(&runtime.local_ws_url, &cookies).await {
+                    if let Some(mut managed) = self.runtimes.lock().await.remove(&session_id) {
+                        let _ = managed.child.kill().await;
+                    }
+                    let _ = self.db.update_session_state(
+                        &session_id,
+                        SessionState::Failed,
+                        None,
+                        None,
+                        Some("profile cookie injection failed"),
+                    );
+                    return Err(err).context("failed to inject profile cookies");
+                }
                 self.db.touch_profile_last_used(profile_id)?;
                 self.emit_event(
                     &session_id,
@@ -637,7 +649,7 @@ impl Gateway {
             return Ok(());
         }
         let (mut stream, _) = connect_async(ws_url).await?;
-        let cookies_json = serde_json::to_value(cookies)?;
+        let cookies_json = Self::cdp_cookie_params(cookies);
         let request = serde_json::json!({
             "id": 1,
             "method": "Storage.setCookies",
@@ -646,8 +658,51 @@ impl Gateway {
         stream
             .send(TungsteniteMessage::Text(request.to_string().into()))
             .await?;
-        let _ = stream.next().await;
-        Ok(())
+        while let Some(message) = stream.next().await {
+            let message = message?;
+            if let TungsteniteMessage::Text(text) = message {
+                let value: Value = serde_json::from_str(&text)?;
+                if value.get("id").and_then(|id| id.as_i64()) == Some(1) {
+                    if let Some(error) = value.get("error") {
+                        bail!("cdp error for Storage.setCookies: {}", error);
+                    }
+                    return Ok(());
+                }
+            }
+        }
+        bail!("cdp connection closed before Storage.setCookies response");
+    }
+
+    pub(crate) fn cdp_cookie_params(cookies: &[StoredCookie]) -> Vec<Value> {
+        cookies
+            .iter()
+            .map(|cookie| {
+                let mut params = serde_json::Map::new();
+                params.insert("name".to_string(), Value::String(cookie.name.clone()));
+                params.insert("value".to_string(), Value::String(cookie.value.clone()));
+                params.insert("path".to_string(), Value::String(cookie.path.clone()));
+                params.insert("secure".to_string(), Value::Bool(cookie.secure));
+                params.insert("httpOnly".to_string(), Value::Bool(cookie.http_only));
+                if let Some(expires) = cookie.expires {
+                    params.insert(
+                        "expires".to_string(),
+                        Value::Number(serde_json::Number::from(expires)),
+                    );
+                }
+
+                if cookie.name.starts_with("__Host-") {
+                    if let Some(url) = cookie_url_for_param(cookie) {
+                        params.insert("url".to_string(), Value::String(url));
+                    } else {
+                        params.insert("domain".to_string(), Value::String(cookie.domain.clone()));
+                    }
+                } else {
+                    params.insert("domain".to_string(), Value::String(cookie.domain.clone()));
+                }
+
+                Value::Object(params)
+            })
+            .collect()
     }
 
     async fn fetch_cookies(&self, ws_url: &str) -> Result<Vec<StoredCookie>> {
@@ -1002,6 +1057,17 @@ fn append_obscura_launch_args(
     }
 }
 
+fn cookie_url_for_param(cookie: &StoredCookie) -> Option<String> {
+    let host = cookie.domain.trim_start_matches('.');
+    if host.is_empty() {
+        return None;
+    }
+    let scheme = if cookie.secure { "https" } else { "http" };
+    Url::parse(&format!("{scheme}://{host}"))
+        .ok()
+        .map(|url| url.to_string().trim_end_matches('/').to_string())
+}
+
 #[cfg(test)]
 fn obscura_launch_args(stealth: bool, identity: Option<&ProfileIdentity>) -> Vec<String> {
     let mut args = Vec::new();
@@ -1202,5 +1268,43 @@ mod tests {
             vec!["--stealth", "--user-agent", "ua"]
         );
         assert!(obscura_launch_args(false, None).is_empty());
+    }
+
+    #[test]
+    fn cdp_cookie_params_use_browser_field_names() {
+        let cookies = vec![StoredCookie {
+            name: "SID".into(),
+            value: "abc".into(),
+            domain: ".youtube.com".into(),
+            path: "/".into(),
+            secure: true,
+            http_only: true,
+            expires: Some(2147483647),
+        }];
+
+        let params = Gateway::cdp_cookie_params(&cookies);
+        let cookie = params[0].as_object().unwrap();
+        assert_eq!(cookie.get("domain").unwrap(), ".youtube.com");
+        assert_eq!(cookie.get("httpOnly").unwrap(), true);
+        assert!(cookie.get("http_only").is_none());
+        assert_eq!(cookie.get("expires").unwrap(), 2147483647);
+    }
+
+    #[test]
+    fn host_prefixed_cookie_params_use_url() {
+        let cookies = vec![StoredCookie {
+            name: "__Host-test".into(),
+            value: "abc".into(),
+            domain: ".youtube.com".into(),
+            path: "/".into(),
+            secure: true,
+            http_only: true,
+            expires: None,
+        }];
+
+        let params = Gateway::cdp_cookie_params(&cookies);
+        let cookie = params[0].as_object().unwrap();
+        assert_eq!(cookie.get("url").unwrap(), "https://youtube.com");
+        assert!(cookie.get("domain").is_none());
     }
 }

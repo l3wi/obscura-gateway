@@ -103,5 +103,7 @@ Cookie notes:
 - `--format auto` infers JSON or Netscape format from parsing and file extension.
 - JSON may be an array or `{ "cookies": [...] }`.
 - Netscape import expects seven tab-separated fields.
+- Netscape `#HttpOnly_` cookies and JSON `httpOnly` fields are preserved.
+- `HttpOnly` auth cookies do not appear in `document.cookie`; verify browser injection with CDP `Storage.getCookies`.
 - Cookies are saved as profile JSON and Netscape files under `~/.obscura-gateway/cookies/`.
 - The last raw cookie import is stored under the profile directory as `last-cookie-import` for audit/debugging.

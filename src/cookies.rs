@@ -31,8 +31,8 @@ pub fn parse_json(input: &str) -> Result<Vec<StoredCookie>> {
         secure: bool,
         #[serde(default, alias = "httpOnly")]
         http_only: bool,
-        #[serde(default)]
-        expires: Option<i64>,
+        #[serde(default, alias = "expirationDate", alias = "expiry")]
+        expires: Option<serde_json::Value>,
     }
 
     fn default_path() -> String {
@@ -57,16 +57,33 @@ pub fn parse_json(input: &str) -> Result<Vec<StoredCookie>> {
             path: c.path,
             secure: c.secure,
             http_only: c.http_only,
-            expires: c.expires,
+            expires: c.expires.and_then(epoch_seconds),
         })
         .collect())
+}
+
+fn epoch_seconds(value: serde_json::Value) -> Option<i64> {
+    match value {
+        serde_json::Value::Number(number) => number
+            .as_i64()
+            .or_else(|| number.as_f64().map(|value| value.trunc() as i64))
+            .filter(|value| *value > 0),
+        serde_json::Value::String(value) => value.parse::<i64>().ok().filter(|value| *value > 0),
+        _ => None,
+    }
 }
 
 pub fn parse_netscape(input: &str) -> Result<Vec<StoredCookie>> {
     let mut out = Vec::new();
     for raw_line in input.lines() {
-        let line = raw_line.trim();
-        if line.is_empty() || line.starts_with('#') {
+        let mut line = raw_line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let http_only = line.starts_with("#HttpOnly_");
+        if http_only {
+            line = line.trim_start_matches("#HttpOnly_");
+        } else if line.starts_with('#') {
             continue;
         }
         let parts: Vec<&str> = line.split('\t').collect();
@@ -80,7 +97,7 @@ pub fn parse_netscape(input: &str) -> Result<Vec<StoredCookie>> {
             expires: parts[4].parse::<i64>().ok().filter(|v| *v > 0),
             name: parts[5].to_string(),
             value: parts[6].to_string(),
-            http_only: parts[1].eq_ignore_ascii_case("TRUE"),
+            http_only,
         });
     }
     Ok(out)
@@ -93,10 +110,19 @@ pub fn export_json(cookies: &[StoredCookie]) -> Result<String> {
 pub fn export_netscape(cookies: &[StoredCookie]) -> String {
     let mut lines = vec!["# Netscape HTTP Cookie File".to_string()];
     for cookie in cookies {
+        let domain = if cookie.http_only {
+            format!("#HttpOnly_{}", cookie.domain)
+        } else {
+            cookie.domain.clone()
+        };
         lines.push(format!(
             "{}\t{}\t{}\t{}\t{}\t{}\t{}",
-            cookie.domain,
-            if cookie.http_only { "TRUE" } else { "FALSE" },
+            domain,
+            if cookie.domain.starts_with('.') {
+                "TRUE"
+            } else {
+                "FALSE"
+            },
             cookie.path,
             if cookie.secure { "TRUE" } else { "FALSE" },
             cookie.expires.unwrap_or(0),
@@ -151,6 +177,7 @@ mod tests {
         let raw = ".example.com\tFALSE\t/\tTRUE\t0\tsid\tabc";
         let parsed = parse_netscape(raw).unwrap();
         assert_eq!(parsed[0].name, "sid");
+        assert!(!parsed[0].http_only);
         assert_eq!(
             cookie_urls(&parsed),
             vec!["https://example.com".to_string()]
@@ -158,10 +185,33 @@ mod tests {
     }
 
     #[test]
+    fn parses_netscape_http_only_prefix() {
+        let raw = "#HttpOnly_.example.com\tTRUE\t/\tTRUE\t2147483647\tSID\tabc";
+        let parsed = parse_netscape(raw).unwrap();
+        assert_eq!(parsed[0].domain, ".example.com");
+        assert!(parsed[0].http_only);
+    }
+
+    #[test]
     fn parses_json() {
-        let raw =
-            r#"[{"name":"sid","value":"abc","domain":".example.com","path":"/","secure":true}]"#;
+        let raw = r#"[{"name":"sid","value":"abc","domain":".example.com","path":"/","secure":true,"httpOnly":true,"expirationDate":2147483647.5}]"#;
         let parsed = parse_json(raw).unwrap();
         assert_eq!(parsed[0].value, "abc");
+        assert!(parsed[0].http_only);
+        assert_eq!(parsed[0].expires, Some(2147483647));
+    }
+
+    #[test]
+    fn exports_netscape_http_only_prefix() {
+        let output = export_netscape(&[StoredCookie {
+            name: "SID".into(),
+            value: "abc".into(),
+            domain: ".example.com".into(),
+            path: "/".into(),
+            secure: true,
+            http_only: true,
+            expires: Some(2147483647),
+        }]);
+        assert!(output.contains("#HttpOnly_.example.com\tTRUE\t/\tTRUE\t2147483647\tSID\tabc"));
     }
 }

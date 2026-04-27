@@ -95,6 +95,7 @@ pub struct AppConfig {
     pub idle_ttl_secs: i64,
     pub absolute_ttl_secs: i64,
     pub default_domain_policy: DomainPolicy,
+    #[serde(default = "default_true")]
     pub default_stealth: bool,
     pub default_proxy_policy: String,
     #[serde(default)]
@@ -125,6 +126,10 @@ impl Default for DomainPolicy {
             denylist: Vec::new(),
         }
     }
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl AppConfig {
@@ -257,6 +262,27 @@ mod tests {
         assert!(is_under_root(&paths.root, &paths.config_file));
         assert!(is_under_root(&paths.root, &paths.database_file));
         assert!(is_under_root(&paths.root, &paths.cookies_dir));
+    }
+
+    #[test]
+    fn config_defaults_missing_default_stealth() {
+        let raw = r#"
+server_url = "http://127.0.0.1:18789"
+api_key = "secret"
+listen_addr = "127.0.0.1:18789"
+obscura_bin = "obscura"
+connect_ttl_secs = 300
+idle_ttl_secs = 900
+absolute_ttl_secs = 3600
+default_proxy_policy = "direct"
+
+[default_domain_policy]
+allowlist = []
+denylist = []
+"#;
+
+        let config: AppConfig = toml::from_str(raw).unwrap();
+        assert!(config.default_stealth);
     }
 
     #[test]

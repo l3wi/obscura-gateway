@@ -1,5 +1,5 @@
 use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use utoipa::ToSchema;
 
 pub const MAX_CONCURRENT_SESSIONS: usize = 25;
@@ -275,6 +275,28 @@ pub struct StoredCookie {
     pub domain: String,
     pub path: String,
     pub secure: bool,
+    #[serde(default, rename = "httpOnly", alias = "http_only")]
     pub http_only: bool,
+    #[serde(
+        default,
+        alias = "expirationDate",
+        alias = "expiry",
+        deserialize_with = "deserialize_optional_epoch_seconds"
+    )]
     pub expires: Option<i64>,
+}
+
+fn deserialize_optional_epoch_seconds<'de, D>(deserializer: D) -> Result<Option<i64>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = Option::<serde_json::Value>::deserialize(deserializer)?;
+    Ok(match value {
+        Some(serde_json::Value::Number(number)) => number
+            .as_i64()
+            .or_else(|| number.as_f64().map(|value| value.trunc() as i64))
+            .filter(|value| *value > 0),
+        Some(serde_json::Value::String(value)) => value.parse::<i64>().ok().filter(|v| *v > 0),
+        _ => None,
+    })
 }

@@ -314,6 +314,8 @@ obscura-cli cookies export --profile <profile_id> --format netscape --output coo
 
 Do not import cookies while the profile has active sessions attached.
 
+`HttpOnly` auth cookies are not visible from `document.cookie`. Use CDP `Storage.getCookies` through a grant when verifying browser cookie injection for sites such as YouTube.
+
 ### Proxy Policies
 
 Add a named proxy policy:
