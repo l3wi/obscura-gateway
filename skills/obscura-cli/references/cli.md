@@ -17,7 +17,7 @@ curl -fsSL https://raw.githubusercontent.com/l3wi/obscura-gateway/main/scripts/i
 Install a specific tag:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/l3wi/obscura-gateway/main/scripts/install-obscura-cli.sh | VERSION=v0.1.0 sh
+curl -fsSL https://raw.githubusercontent.com/l3wi/obscura-gateway/main/scripts/install-obscura-cli.sh | VERSION=v0.2.0 sh
 ```
 
 Manual downloads:

@@ -137,7 +137,7 @@ curl -fsSL https://raw.githubusercontent.com/l3wi/obscura-gateway/main/scripts/i
 Install a specific tag:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/l3wi/obscura-gateway/main/scripts/install-obscura-cli.sh | VERSION=v0.1.0 sh
+curl -fsSL https://raw.githubusercontent.com/l3wi/obscura-gateway/main/scripts/install-obscura-cli.sh | VERSION=v0.2.0 sh
 ```
 
 Manual downloads are available from GitHub releases:
@@ -400,8 +400,8 @@ cargo clippy --all-targets -- -D warnings
 Push a version tag to publish downloadable GitHub release assets:
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.2.0
+git push origin v0.2.0
 ```
 
 The release workflow builds Linux `x86_64` artifacts:
