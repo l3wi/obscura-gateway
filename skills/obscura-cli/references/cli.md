@@ -8,7 +8,7 @@ The gateway server is separate. If the task is to run/deploy the server, use `ob
 
 ## Install
 
-Install latest Linux `x86_64` release:
+Install the latest release for the current supported platform:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/l3wi/obscura-gateway/main/scripts/install-obscura-cli.sh | sh
@@ -17,7 +17,7 @@ curl -fsSL https://raw.githubusercontent.com/l3wi/obscura-gateway/main/scripts/i
 Install a specific tag:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/l3wi/obscura-gateway/main/scripts/install-obscura-cli.sh | VERSION=v0.2.0 sh
+curl -fsSL https://raw.githubusercontent.com/l3wi/obscura-gateway/main/scripts/install-obscura-cli.sh | VERSION=v0.2.1 sh
 ```
 
 Manual downloads:
@@ -25,6 +25,8 @@ Manual downloads:
 ```text
 https://github.com/l3wi/obscura-gateway/releases
 ```
+
+Release targets are `x86_64-unknown-linux-gnu`, `aarch64-apple-darwin`, `x86_64-apple-darwin`, and `x86_64-pc-windows-msvc`.
 
 ## Configure
 

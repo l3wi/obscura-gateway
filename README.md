@@ -126,7 +126,7 @@ When developing from source, use `cargo run --bin obscura-gateway -- ...` for th
 
 ### CLI Install From Release
 
-Tagged releases publish a downloadable `obscura-cli` archive for Linux `x86_64`.
+Tagged releases publish downloadable `obscura-cli` archives for Linux `x86_64`, macOS Apple Silicon, macOS Intel, and Windows `x86_64`.
 
 Install the latest release:
 
@@ -137,7 +137,7 @@ curl -fsSL https://raw.githubusercontent.com/l3wi/obscura-gateway/main/scripts/i
 Install a specific tag:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/l3wi/obscura-gateway/main/scripts/install-obscura-cli.sh | VERSION=v0.2.0 sh
+curl -fsSL https://raw.githubusercontent.com/l3wi/obscura-gateway/main/scripts/install-obscura-cli.sh | VERSION=v0.2.1 sh
 ```
 
 Manual downloads are available from GitHub releases:
@@ -400,15 +400,17 @@ cargo clippy --all-targets -- -D warnings
 Push a version tag to publish downloadable GitHub release assets:
 
 ```bash
-git tag v0.2.0
-git push origin v0.2.0
+git tag v0.2.1
+git push origin v0.2.1
 ```
 
-The release workflow builds Linux `x86_64` artifacts:
+The release workflow builds assets for Linux, macOS, and Windows:
 
-- `obscura-cli-<tag>-x86_64-unknown-linux-gnu.tar.gz`: installable CLI archive.
-- `obscura-gateway-<tag>-x86_64-unknown-linux-gnu.tar.gz`: gateway plus CLI archive.
+- `obscura-cli-<tag>-<target>.tar.gz`: installable CLI archive.
+- `obscura-gateway-<tag>-<target>.tar.gz`: gateway plus CLI archive.
 - `SHA256SUMS`: checksums for release downloads.
+
+Published targets are `x86_64-unknown-linux-gnu`, `aarch64-apple-darwin`, `x86_64-apple-darwin`, and `x86_64-pc-windows-msvc`.
 
 ## Contributing
 

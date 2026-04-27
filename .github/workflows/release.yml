@@ -18,6 +18,12 @@ jobs:
         include:
           - os: ubuntu-24.04
             target: x86_64-unknown-linux-gnu
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+          - os: macos-15
+            target: aarch64-apple-darwin
+          - os: windows-2022
+            target: x86_64-pc-windows-msvc
 
     steps:
       - name: Checkout
@@ -39,19 +45,46 @@ jobs:
           target="${{ matrix.target }}"
           bin_dir="target/${target}/release"
           dist_dir="dist"
+          exe=""
+
+          if [[ "${target}" == *windows* ]]; then
+            exe=".exe"
+          fi
 
           mkdir -p "${dist_dir}/obscura-cli-${version}-${target}"
-          cp "${bin_dir}/obscura-cli" "${dist_dir}/obscura-cli-${version}-${target}/"
+          cp "${bin_dir}/obscura-cli${exe}" "${dist_dir}/obscura-cli-${version}-${target}/"
           cp README.md "${dist_dir}/obscura-cli-${version}-${target}/"
           tar -C "${dist_dir}" -czf "${dist_dir}/obscura-cli-${version}-${target}.tar.gz" "obscura-cli-${version}-${target}"
 
           mkdir -p "${dist_dir}/obscura-gateway-${version}-${target}"
-          cp "${bin_dir}/obscura-gateway" "${dist_dir}/obscura-gateway-${version}-${target}/"
-          cp "${bin_dir}/obscura-cli" "${dist_dir}/obscura-gateway-${version}-${target}/"
+          cp "${bin_dir}/obscura-gateway${exe}" "${dist_dir}/obscura-gateway-${version}-${target}/"
+          cp "${bin_dir}/obscura-cli${exe}" "${dist_dir}/obscura-gateway-${version}-${target}/"
           cp README.md DOCKER.md "${dist_dir}/obscura-gateway-${version}-${target}/"
           tar -C "${dist_dir}" -czf "${dist_dir}/obscura-gateway-${version}-${target}.tar.gz" "obscura-gateway-${version}-${target}"
 
-          (cd "${dist_dir}" && sha256sum *.tar.gz > SHA256SUMS)
+      - name: Upload packaged assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.target }}
+          path: dist/*.tar.gz
+
+  release:
+    name: Publish release
+    runs-on: ubuntu-24.04
+    needs: build
+
+    steps:
+      - name: Download packaged assets
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Generate checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd dist && sha256sum *.tar.gz > SHA256SUMS)
 
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2

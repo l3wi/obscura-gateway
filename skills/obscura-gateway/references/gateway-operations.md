@@ -106,15 +106,17 @@ Useful server endpoints:
 Tagged releases publish both binaries:
 
 ```bash
-git tag v0.2.0
-git push origin v0.2.0
+git tag v0.2.1
+git push origin v0.2.1
 ```
 
 Release assets:
 
-- `obscura-cli-<tag>-x86_64-unknown-linux-gnu.tar.gz`
-- `obscura-gateway-<tag>-x86_64-unknown-linux-gnu.tar.gz`
+- `obscura-cli-<tag>-<target>.tar.gz`
+- `obscura-gateway-<tag>-<target>.tar.gz`
 - `SHA256SUMS`
+
+Published targets are `x86_64-unknown-linux-gnu`, `aarch64-apple-darwin`, `x86_64-apple-darwin`, and `x86_64-pc-windows-msvc`.
 
 ## Tests
 
