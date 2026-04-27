@@ -1,6 +1,6 @@
 # Docker
 
-The gateway can run in a self-contained container. The image builds the Rust gateway binary and downloads the pinned Obscura release binary from GitHub.
+The gateway can run in a self-contained container. The image builds the Rust `obscura-gateway` and `obscura-cli` binaries and downloads the pinned Obscura release binary from GitHub.
 
 Default Obscura release:
 
@@ -70,4 +70,5 @@ Keep `OBSCURA_GATEWAY_LISTEN_ADDR=0.0.0.0:18789` inside the container so Docker 
 - Sessions remain ephemeral. Restarting the container marks previously active sessions failed.
 - Profiles, cookies, database state, artifacts, and generated API keys live in the state volume.
 - CDP child processes run inside the same container; their local WebSocket ports stay on container loopback and are proxied by the gateway.
+- The image includes `obscura-cli` for container-local diagnostics, but normal client usage should use the downloaded host CLI against the published gateway URL.
 - The bundled Dockerfile currently defaults to Linux `amd64`, matching the published Obscura Linux release asset documented by upstream.

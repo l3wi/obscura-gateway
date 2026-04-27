@@ -3,6 +3,14 @@ name = "obscura-gateway"
 version = "0.1.0"
 edition = "2024"
 
+[[bin]]
+name = "obscura-gateway"
+path = "src/main.rs"
+
+[[bin]]
+name = "obscura-cli"
+path = "src/bin/obscura-cli.rs"
+
 [dependencies]
 anyhow = "1.0"
 axum = { version = "0.8", features = ["macros", "multipart", "ws"] }

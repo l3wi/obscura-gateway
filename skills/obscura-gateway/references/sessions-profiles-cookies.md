@@ -5,20 +5,20 @@
 Create direct sessions by default:
 
 ```bash
-cargo run -- session create
+obscura-cli session create
 ```
 
 Create with domain policy:
 
 ```bash
-cargo run -- session create --allowed-domain example.com
-cargo run -- session create --denied-domain bad.example.com
+obscura-cli session create --allowed-domain example.com
+obscura-cli session create --denied-domain bad.example.com
 ```
 
 Create with a proxy policy:
 
 ```bash
-cargo run -- session create --proxy-policy <policy_name>
+obscura-cli session create --proxy-policy <policy_name>
 ```
 
 Rules:
@@ -36,13 +36,13 @@ Profiles persist identity and cookies across sessions. Use them for logged-in st
 Create a profile:
 
 ```bash
-cargo run -- profile create <name> --description "purpose and owner"
+obscura-cli profile create <name> --description "purpose and owner"
 ```
 
 Create with identity hints:
 
 ```bash
-cargo run -- profile create research \
+obscura-cli profile create research \
   --description "research profile" \
   --user-agent "<ua>" \
   --accept-language "en-US,en;q=0.9" \
@@ -55,13 +55,13 @@ cargo run -- profile create research \
 Use read-only mode when cookies must not be saved back:
 
 ```bash
-cargo run -- session create --profile <profile_id> --profile-mode read_only
+obscura-cli session create --profile <profile_id> --profile-mode read_only
 ```
 
 Use read-write mode when session cookies should persist on close:
 
 ```bash
-cargo run -- session create --profile <profile_id> --profile-mode read_write
+obscura-cli session create --profile <profile_id> --profile-mode read_write
 ```
 
 Profile rules:
@@ -78,15 +78,15 @@ Profile rules:
 Import cookies into a profile:
 
 ```bash
-cargo run -- cookies import --profile <profile_id> --file cookies.json --format json
-cargo run -- cookies import --profile <profile_id> --file cookies.txt --format netscape
+obscura-cli cookies import --profile <profile_id> --file cookies.json --format json
+obscura-cli cookies import --profile <profile_id> --file cookies.txt --format netscape
 ```
 
 Export cookies:
 
 ```bash
-cargo run -- cookies export --profile <profile_id> --format json --output cookies.json
-cargo run -- cookies export --profile <profile_id> --format netscape --output cookies.txt
+obscura-cli cookies export --profile <profile_id> --format json --output cookies.json
+obscura-cli cookies export --profile <profile_id> --format netscape --output cookies.txt
 ```
 
 Cookie notes:

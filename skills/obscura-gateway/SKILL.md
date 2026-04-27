@@ -16,21 +16,23 @@ Use the gateway primitives rather than ad-hoc browser automation when the user n
 From the repo root:
 
 ```bash
-cargo run -- setup
-cargo run -- run
+cargo run --bin obscura-gateway -- setup
+cargo run --bin obscura-gateway -- run
 ```
 
 In another shell:
 
 ```bash
-cargo run -- status
-cargo run -- quotas
-cargo run -- session create
-cargo run -- session navigate <session_id> https://example.com/
-cargo run -- session eval <session_id> "document.title"
-cargo run -- session dump <session_id> --format text
-cargo run -- session close <session_id>
+obscura-cli status
+obscura-cli quotas
+obscura-cli session create
+obscura-cli session navigate <session_id> https://example.com/
+obscura-cli session eval <session_id> "document.title"
+obscura-cli session dump <session_id> --format text
+obscura-cli session close <session_id>
 ```
+
+From source, replace `obscura-cli` with `cargo run --bin obscura-cli --`.
 
 Always close sessions when finished. Sessions are ephemeral and backed by live child `obscura` processes.
 

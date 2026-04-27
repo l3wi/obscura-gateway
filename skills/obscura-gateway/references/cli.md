@@ -15,32 +15,34 @@ The CLI sends requests to `server_url` with `Authorization: Bearer <api_key>`.
 Verify local setup:
 
 ```bash
-cargo run -- setup
+cargo run --bin obscura-gateway -- setup
 ```
 
 Run the gateway:
 
 ```bash
-cargo run -- run
+cargo run --bin obscura-gateway -- run
 ```
 
 Inspect operational state:
 
 ```bash
-cargo run -- status
-cargo run -- quotas
-cargo run -- session list
-cargo run -- profile list
-cargo run -- config show
+obscura-cli status
+obscura-cli quotas
+obscura-cli session list
+obscura-cli profile list
+obscura-cli config show
 ```
+
+From source, replace `obscura-cli` with `cargo run --bin obscura-cli --`.
 
 ## Configure CLI Or Remote Gateway
 
 Point the local CLI at a gateway:
 
 ```bash
-cargo run -- config set-server-url https://gw.example.com
-cargo run -- config set-api-key <gateway_api_key>
+obscura-cli config set-server-url https://gw.example.com
+obscura-cli config set-api-key <gateway_api_key>
 ```
 
 For a local server on a non-default bind address, edit `listen_addr` in `config.toml` and set `server_url` to the URL clients can reach.
@@ -48,8 +50,8 @@ For a local server on a non-default bind address, edit `listen_addr` in `config.
 Use these commands for binary and proxy defaults:
 
 ```bash
-cargo run -- config set-obscura-bin /path/to/obscura
-cargo run -- config set-default-proxy-policy direct
+obscura-cli config set-obscura-bin /path/to/obscura
+obscura-cli config set-default-proxy-policy direct
 ```
 
 ## Common Operations
@@ -57,25 +59,25 @@ cargo run -- config set-default-proxy-policy direct
 Create and use a direct session:
 
 ```bash
-cargo run -- session create
-cargo run -- session navigate <session_id> https://example.com/
-cargo run -- session eval <session_id> "document.title"
-cargo run -- session dump <session_id> --format html
-cargo run -- session dump <session_id> --format text
-cargo run -- session dump <session_id> --format links
-cargo run -- session close <session_id>
+obscura-cli session create
+obscura-cli session navigate <session_id> https://example.com/
+obscura-cli session eval <session_id> "document.title"
+obscura-cli session dump <session_id> --format html
+obscura-cli session dump <session_id> --format text
+obscura-cli session dump <session_id> --format links
+obscura-cli session close <session_id>
 ```
 
 List session artifacts:
 
 ```bash
-cargo run -- artifacts list <session_id>
+obscura-cli artifacts list <session_id>
 ```
 
 Tail events:
 
 ```bash
-cargo run -- events tail <session_id>
+obscura-cli events tail <session_id>
 ```
 
 ## Testing

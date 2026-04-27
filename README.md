@@ -4,10 +4,10 @@ Obscura Gateway is a control plane and CLI for running short-lived [Obscura](htt
 
 The gateway runs an HTTP API, stores state in SQLite, and spawns `obscura serve` child processes for active sessions. Child CDP ports stay on loopback and are accessed through gateway actions or one-time CDP grants.
 
-The package has two distinct roles:
+The package ships two distinct binaries:
 
-- **Gateway server**: the long-running service that owns state, starts/stops Obscura child processes, enforces policy, and exposes the HTTP API.
-- **CLI client**: the command-line interface used to configure a local or remote gateway and call the API for sessions, profiles, cookies, grants, and diagnostics.
+- **`obscura-gateway`**: the long-running service that owns state, starts/stops Obscura child processes, enforces policy, and exposes the HTTP API.
+- **`obscura-cli`**: the command-line client used to configure a local or remote gateway and call the API for sessions, profiles, cookies, grants, and diagnostics.
 
 ## Features
 
@@ -19,6 +19,7 @@ The package has two distinct roles:
 - One-time, expiring CDP WebSocket grants for tools that need raw browser protocol access.
 - Server status, quotas, session events, artifacts, and OpenAPI JSON.
 - Docker image that bundles the pinned upstream Obscura release binary.
+- First-class `obscura-cli` release artifact for direct download and install.
 - Agent Skill metadata under `skills/obscura-gateway` for Agent Skills-compatible clients.
 
 ## Gateway Server
@@ -59,13 +60,13 @@ Prerequisites:
 Set up local state and verify the Obscura binary:
 
 ```bash
-cargo run -- setup
+cargo run --bin obscura-gateway -- setup
 ```
 
 Run the gateway:
 
 ```bash
-cargo run -- run
+cargo run --bin obscura-gateway -- run
 ```
 
 The source run mode uses the same config file as the CLI. By default it binds `127.0.0.1:18789`; change `listen_addr` in `~/.obscura-gateway/config.toml` if you need a different bind address.
@@ -114,33 +115,55 @@ In Docker, state lives in `/data/.obscura-gateway` and should be mounted as a pe
 
 ## CLI Client
 
-The CLI is a client for the gateway API. It can also bootstrap local config with `setup` and start a local gateway with `run`, but day-to-day CLI commands send authenticated HTTP requests to the configured `server_url`.
+The CLI is a first-class client for the gateway API. It can also bootstrap local config with `setup`, but day-to-day CLI commands send authenticated HTTP requests to the configured `server_url`.
 
-The same binary provides both roles:
+Use the binaries by role:
 
 - `obscura-gateway run` starts the gateway server.
-- `obscura-gateway session ...`, `profile ...`, `cookies ...`, `grant ...`, `status`, and `quotas` act as CLI client commands.
+- `obscura-cli session ...`, `profile ...`, `cookies ...`, `grant ...`, `status`, and `quotas` call the gateway API.
 
-When developing from source, replace `obscura-gateway` with `cargo run --`.
+When developing from source, use `cargo run --bin obscura-gateway -- ...` for the server and `cargo run --bin obscura-cli -- ...` for CLI commands.
+
+### CLI Install From Release
+
+Tagged releases publish a downloadable `obscura-cli` archive for Linux `x86_64`.
+
+Install the latest release:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/l3wi/obscura-gateway/main/scripts/install-obscura-cli.sh | sh
+```
+
+Install a specific tag:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/l3wi/obscura-gateway/main/scripts/install-obscura-cli.sh | VERSION=v0.1.0 sh
+```
+
+Manual downloads are available from GitHub releases:
+
+```text
+https://github.com/l3wi/obscura-gateway/releases
+```
 
 ### CLI Quickstart: Local Gateway
 
 Start the gateway server in one shell:
 
 ```bash
-cargo run -- run
+obscura-gateway run
 ```
 
 Use the CLI from another shell:
 
 ```bash
-cargo run -- status
-cargo run -- quotas
-cargo run -- session create
-cargo run -- session navigate <session_id> https://example.com/
-cargo run -- session eval <session_id> "document.title"
-cargo run -- session dump <session_id> --format text
-cargo run -- session close <session_id>
+obscura-cli status
+obscura-cli quotas
+obscura-cli session create
+obscura-cli session navigate <session_id> https://example.com/
+obscura-cli session eval <session_id> "document.title"
+obscura-cli session dump <session_id> --format text
+obscura-cli session close <session_id>
 ```
 
 ### CLI Quickstart: Remote Gateway
@@ -148,15 +171,15 @@ cargo run -- session close <session_id>
 Point the CLI at a remote gateway:
 
 ```bash
-cargo run -- config set-server-url https://gw.example.com
-cargo run -- config set-api-key <gateway_api_key>
+obscura-cli config set-server-url https://gw.example.com
+obscura-cli config set-api-key <gateway_api_key>
 ```
 
 Verify connectivity:
 
 ```bash
-cargo run -- status
-cargo run -- quotas
+obscura-cli status
+obscura-cli quotas
 ```
 
 ### CLI Configuration
@@ -164,19 +187,19 @@ cargo run -- quotas
 Show current config:
 
 ```bash
-cargo run -- config show
+obscura-cli config show
 ```
 
 Configure the Obscura binary path:
 
 ```bash
-cargo run -- config set-obscura-bin /usr/local/bin/obscura
+obscura-cli config set-obscura-bin /usr/local/bin/obscura
 ```
 
 Set a default proxy policy:
 
 ```bash
-cargo run -- config set-default-proxy-policy direct
+obscura-cli config set-default-proxy-policy direct
 ```
 
 `server_url` is the URL the CLI calls and the base used for CDP grant URLs. `listen_addr` is only used by the gateway server when it binds a socket.
@@ -188,16 +211,16 @@ cargo run -- config set-default-proxy-policy direct
 Create an ephemeral direct session:
 
 ```bash
-cargo run -- session create
+obscura-cli session create
 ```
 
 Navigate, evaluate JavaScript, dump page content, and close:
 
 ```bash
-cargo run -- session navigate <session_id> https://example.com/
-cargo run -- session eval <session_id> "document.title"
-cargo run -- session dump <session_id> --format text
-cargo run -- session close <session_id>
+obscura-cli session navigate <session_id> https://example.com/
+obscura-cli session eval <session_id> "document.title"
+obscura-cli session dump <session_id> --format text
+obscura-cli session close <session_id>
 ```
 
 Supported dump formats:
@@ -209,14 +232,14 @@ Supported dump formats:
 Create a session with domain policy:
 
 ```bash
-cargo run -- session create --allowed-domain example.com
-cargo run -- session create --denied-domain bad.example.com
+obscura-cli session create --allowed-domain example.com
+obscura-cli session create --denied-domain bad.example.com
 ```
 
 Create a session with a proxy policy:
 
 ```bash
-cargo run -- session create --proxy-policy <policy_name>
+obscura-cli session create --proxy-policy <policy_name>
 ```
 
 Sessions are intentionally ephemeral. If the gateway restarts, previously active sessions are marked `failed`; create a new session after restart.
@@ -228,13 +251,13 @@ Profiles persist identity and cookies across sessions.
 Create a profile:
 
 ```bash
-cargo run -- profile create research --description "research profile"
+obscura-cli profile create research --description "research profile"
 ```
 
 Create with identity hints:
 
 ```bash
-cargo run -- profile create research \
+obscura-cli profile create research \
   --description "research profile" \
   --user-agent "<user-agent>" \
   --accept-language "en-US,en;q=0.9" \
@@ -246,13 +269,13 @@ cargo run -- profile create research \
 Use a profile in read-only mode:
 
 ```bash
-cargo run -- session create --profile <profile_id> --profile-mode read_only
+obscura-cli session create --profile <profile_id> --profile-mode read_only
 ```
 
 Use read-write mode when updated cookies should be saved back on close:
 
 ```bash
-cargo run -- session create --profile <profile_id> --profile-mode read_write
+obscura-cli session create --profile <profile_id> --profile-mode read_write
 ```
 
 Only one active read-write session is allowed per profile. Multiple read-only sessions may share a profile.
@@ -262,15 +285,15 @@ Only one active read-write session is allowed per profile. Multiple read-only se
 Import cookies:
 
 ```bash
-cargo run -- cookies import --profile <profile_id> --file cookies.json --format json
-cargo run -- cookies import --profile <profile_id> --file cookies.txt --format netscape
+obscura-cli cookies import --profile <profile_id> --file cookies.json --format json
+obscura-cli cookies import --profile <profile_id> --file cookies.txt --format netscape
 ```
 
 Export cookies:
 
 ```bash
-cargo run -- cookies export --profile <profile_id> --format json --output cookies.json
-cargo run -- cookies export --profile <profile_id> --format netscape --output cookies.txt
+obscura-cli cookies export --profile <profile_id> --format json --output cookies.json
+obscura-cli cookies export --profile <profile_id> --format netscape --output cookies.txt
 ```
 
 Do not import cookies while the profile has active sessions attached.
@@ -280,7 +303,7 @@ Do not import cookies while the profile has active sessions attached.
 Add a named proxy policy:
 
 ```bash
-cargo run -- config upsert-proxy-policy ch socks5 127.0.0.1 1080 \
+obscura-cli config upsert-proxy-policy ch socks5 127.0.0.1 1080 \
   --country CH \
   --city Zurich
 ```
@@ -288,7 +311,7 @@ cargo run -- config upsert-proxy-policy ch socks5 127.0.0.1 1080 \
 Set the default proxy policy:
 
 ```bash
-cargo run -- config set-default-proxy-policy ch
+obscura-cli config set-default-proxy-policy ch
 ```
 
 Use `direct` for sessions that should bypass proxies.
@@ -298,7 +321,7 @@ Use `direct` for sessions that should bypass proxies.
 Create a one-time CDP grant:
 
 ```bash
-cargo run -- grant cdp <session_id>
+obscura-cli grant cdp <session_id>
 ```
 
 The response contains a temporary `ws://` or `wss://` URL. Grants are single-use and expire according to `connect_ttl_secs`.
@@ -350,6 +373,21 @@ If `cargo clippy` is installed, run it before submitting changes:
 ```bash
 cargo clippy --all-targets -- -D warnings
 ```
+
+## Releases
+
+Push a version tag to publish downloadable GitHub release assets:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+The release workflow builds Linux `x86_64` artifacts:
+
+- `obscura-cli-<tag>-x86_64-unknown-linux-gnu.tar.gz`: installable CLI archive.
+- `obscura-gateway-<tag>-x86_64-unknown-linux-gnu.tar.gz`: gateway plus CLI archive.
+- `SHA256SUMS`: checksums for release downloads.
 
 ## Contributing
 

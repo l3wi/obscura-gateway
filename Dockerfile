@@ -39,6 +39,7 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=gateway-builder /app/target/release/obscura-gateway /usr/local/bin/obscura-gateway
+COPY --from=gateway-builder /app/target/release/obscura-cli /usr/local/bin/obscura-cli
 COPY --from=obscura-downloader /obscura/obscura /usr/local/bin/obscura
 COPY docker/entrypoint.sh /usr/local/bin/obscura-gateway-entrypoint
 

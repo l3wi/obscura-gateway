@@ -5,7 +5,7 @@
 Use grants when an external agent or tool needs temporary direct CDP WebSocket access:
 
 ```bash
-cargo run -- grant cdp <session_id>
+obscura-cli grant cdp <session_id>
 ```
 
 Grant behavior:
@@ -22,7 +22,7 @@ Prefer CLI `session navigate`, `session eval`, and `session dump` unless raw CDP
 Add a named proxy policy:
 
 ```bash
-cargo run -- config upsert-proxy-policy <name> socks5 127.0.0.1 1080 \
+obscura-cli config upsert-proxy-policy <name> socks5 127.0.0.1 1080 \
   --country CH \
   --city Zurich
 ```
@@ -30,7 +30,7 @@ cargo run -- config upsert-proxy-policy <name> socks5 127.0.0.1 1080 \
 Set a default policy:
 
 ```bash
-cargo run -- config set-default-proxy-policy <name>
+obscura-cli config set-default-proxy-policy <name>
 ```
 
 Use `direct` to bypass proxies. Do not delete the current default proxy policy.
@@ -40,10 +40,10 @@ Use `direct` to bypass proxies. Do not delete the current default proxy policy.
 Start with state:
 
 ```bash
-cargo run -- status
-cargo run -- quotas
-cargo run -- session list
-cargo run -- profile list
+obscura-cli status
+obscura-cli quotas
+obscura-cli session list
+obscura-cli profile list
 ```
 
 Common failures:
