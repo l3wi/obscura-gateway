@@ -406,4 +406,4 @@ Do not commit local gateway state, `.env` files, API keys, cookies, browser prof
 
 ## License
 
-No license file is currently included. Until a license is added, all rights are reserved by the repository owner.
+MIT. See [LICENSE](LICENSE).
