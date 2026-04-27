@@ -32,6 +32,7 @@ pub struct SessionRecord {
     pub absolute_deadline: DateTime<Utc>,
     pub cdp_ws_url: Option<String>,
     pub child_pid: Option<u32>,
+    pub stealth: bool,
     pub proxy_policy: String,
     pub allowed_domains: Vec<String>,
     pub denied_domains: Vec<String>,
@@ -66,6 +67,7 @@ pub struct ProfileRecord {
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, Default)]
 pub struct ProfileIdentity {
+    pub stealth: Option<bool>,
     pub user_agent: Option<String>,
     pub accept_language: Option<String>,
     pub timezone: Option<String>,
@@ -86,6 +88,7 @@ pub struct CreateSessionRequest {
     pub tenant_id: Option<String>,
     pub profile_id: Option<String>,
     pub profile_mode: Option<ProfileMode>,
+    pub stealth: Option<bool>,
     #[serde(default)]
     pub allowed_domains: Vec<String>,
     #[serde(default)]
@@ -205,6 +208,7 @@ pub struct QuotasResponse {
 pub struct ServerStatusResponse {
     pub listen_addr: String,
     pub obscura_bin: String,
+    pub default_stealth: bool,
     pub default_proxy_policy: String,
     pub proxy_policies: usize,
     pub saved_profiles: usize,

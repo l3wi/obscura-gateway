@@ -95,6 +95,7 @@ pub struct AppConfig {
     pub idle_ttl_secs: i64,
     pub absolute_ttl_secs: i64,
     pub default_domain_policy: DomainPolicy,
+    pub default_stealth: bool,
     pub default_proxy_policy: String,
     #[serde(default)]
     pub proxy_policies: BTreeMap<String, ProxyPolicyConfig>,
@@ -137,6 +138,7 @@ impl AppConfig {
             idle_ttl_secs: 900,
             absolute_ttl_secs: 3600,
             default_domain_policy: DomainPolicy::default(),
+            default_stealth: true,
             default_proxy_policy: "direct".to_string(),
             proxy_policies: BTreeMap::new(),
         }
@@ -180,6 +182,10 @@ impl AppConfig {
 
     pub fn set_default_proxy_policy(&mut self, value: String) {
         self.default_proxy_policy = value;
+    }
+
+    pub fn set_default_stealth(&mut self, value: bool) {
+        self.default_stealth = value;
     }
 
     pub fn upsert_proxy_policy(&mut self, name: String, policy: ProxyPolicyConfig) {

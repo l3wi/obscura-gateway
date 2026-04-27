@@ -51,6 +51,7 @@ impl Database {
                 absolute_deadline text not null,
                 cdp_ws_url text,
                 child_pid integer,
+                stealth integer not null,
                 proxy_policy text not null,
                 allowed_domains text not null,
                 denied_domains text not null,
@@ -194,8 +195,8 @@ impl Database {
     pub fn insert_session(&self, session: &SessionRecord) -> Result<()> {
         let conn = self.conn.lock().map_err(|_| anyhow!("db mutex poisoned"))?;
         conn.execute(
-            "insert into sessions (session_id, tenant_id, profile_id, profile_mode, state, created_at, updated_at, idle_deadline, absolute_deadline, cdp_ws_url, child_pid, proxy_policy, allowed_domains, denied_domains, close_reason)
-             values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+            "insert into sessions (session_id, tenant_id, profile_id, profile_mode, state, created_at, updated_at, idle_deadline, absolute_deadline, cdp_ws_url, child_pid, stealth, proxy_policy, allowed_domains, denied_domains, close_reason)
+             values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
             params![
                 session.session_id,
                 session.tenant_id,
@@ -208,6 +209,7 @@ impl Database {
                 session.absolute_deadline.to_rfc3339(),
                 session.cdp_ws_url,
                 session.child_pid.map(|v| v as i64),
+                session.stealth as i64,
                 session.proxy_policy,
                 serde_json::to_string(&session.allowed_domains)?,
                 serde_json::to_string(&session.denied_domains)?,
@@ -245,7 +247,7 @@ impl Database {
     pub fn list_sessions(&self) -> Result<Vec<SessionRecord>> {
         let conn = self.conn.lock().map_err(|_| anyhow!("db mutex poisoned"))?;
         let mut stmt = conn.prepare(
-            "select session_id, tenant_id, profile_id, profile_mode, state, created_at, updated_at, idle_deadline, absolute_deadline, cdp_ws_url, child_pid, proxy_policy, allowed_domains, denied_domains, close_reason
+            "select session_id, tenant_id, profile_id, profile_mode, state, created_at, updated_at, idle_deadline, absolute_deadline, cdp_ws_url, child_pid, stealth, proxy_policy, allowed_domains, denied_domains, close_reason
              from sessions order by created_at desc",
         )?;
         let rows = stmt.query_map([], map_session)?;
@@ -286,7 +288,7 @@ impl Database {
     pub fn get_session(&self, session_id: &str) -> Result<SessionRecord> {
         let conn = self.conn.lock().map_err(|_| anyhow!("db mutex poisoned"))?;
         conn.query_row(
-            "select session_id, tenant_id, profile_id, profile_mode, state, created_at, updated_at, idle_deadline, absolute_deadline, cdp_ws_url, child_pid, proxy_policy, allowed_domains, denied_domains, close_reason
+            "select session_id, tenant_id, profile_id, profile_mode, state, created_at, updated_at, idle_deadline, absolute_deadline, cdp_ws_url, child_pid, stealth, proxy_policy, allowed_domains, denied_domains, close_reason
              from sessions where session_id = ?1",
             [session_id],
             map_session,
@@ -313,7 +315,7 @@ impl Database {
     pub fn active_sessions_for_profile(&self, profile_id: &str) -> Result<Vec<SessionRecord>> {
         let conn = self.conn.lock().map_err(|_| anyhow!("db mutex poisoned"))?;
         let mut stmt = conn.prepare(
-            "select session_id, tenant_id, profile_id, profile_mode, state, created_at, updated_at, idle_deadline, absolute_deadline, cdp_ws_url, child_pid, proxy_policy, allowed_domains, denied_domains, close_reason
+            "select session_id, tenant_id, profile_id, profile_mode, state, created_at, updated_at, idle_deadline, absolute_deadline, cdp_ws_url, child_pid, stealth, proxy_policy, allowed_domains, denied_domains, close_reason
              from sessions
              where profile_id = ?1 and state in ('\"provisioning\"','\"ready\"','\"attached\"','\"idle\"','\"closing\"')
              order by created_at asc",
@@ -405,10 +407,11 @@ fn map_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionRecord> {
             .map_err(|e| rusqlite::Error::ToSqlConversionFailure(e.into()))?,
         cdp_ws_url: row.get(9)?,
         child_pid: row.get::<_, Option<i64>>(10)?.map(|v| v as u32),
-        proxy_policy: row.get(11)?,
-        allowed_domains: serde_json::from_str(&row.get::<_, String>(12)?).unwrap_or_default(),
-        denied_domains: serde_json::from_str(&row.get::<_, String>(13)?).unwrap_or_default(),
-        close_reason: row.get(14)?,
+        stealth: row.get::<_, i64>(11)? != 0,
+        proxy_policy: row.get(12)?,
+        allowed_domains: serde_json::from_str(&row.get::<_, String>(13)?).unwrap_or_default(),
+        denied_domains: serde_json::from_str(&row.get::<_, String>(14)?).unwrap_or_default(),
+        close_reason: row.get(15)?,
     })
 }
 

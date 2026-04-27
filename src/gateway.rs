@@ -29,10 +29,15 @@ use crate::models::{
     DumpLink, DumpSessionResponse, EvaluateSessionRequest, EvaluateSessionResponse, GatewayEvent,
     GrantResponse, MAX_CONCURRENT_SESSIONS, NavigateSessionRequest, NavigateSessionResponse,
     ProfileCookiesImportResponse, ProfileIdentity, ProfileMode, ProfileRecord, SessionRecord,
-    SessionRuntime, SessionState, StoredCookie,
+    SessionRuntime, SessionState, StoredCookie, ViewportConfig,
 };
 
 type HmacSha256 = Hmac<Sha256>;
+const DEFAULT_MACOS_CHROME_145_UA: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36";
+const DEFAULT_ACCEPT_LANGUAGE: &str = "en-US,en;q=0.9";
+const DEFAULT_TIMEZONE: &str = "America/New_York";
+const DEFAULT_VIEWPORT_WIDTH: u32 = 1440;
+const DEFAULT_VIEWPORT_HEIGHT: u32 = 900;
 
 #[derive(Clone)]
 pub struct Gateway {
@@ -179,6 +184,7 @@ impl Gateway {
             }
         }
 
+        let requested_stealth = request.stealth;
         let profile_mode = request.profile_mode.unwrap_or(ProfileMode::ReadOnly);
         let mut profile_identity = None;
         if let Some(profile_id) = &request.profile_id {
@@ -194,6 +200,13 @@ impl Gateway {
                 }
             }
         }
+        let effective_identity =
+            resolve_effective_identity(profile_identity.as_ref(), config.default_stealth);
+        let effective_stealth = resolve_stealth(
+            requested_stealth,
+            profile_identity.as_ref(),
+            config.default_stealth,
+        );
 
         let session_id = Uuid::new_v4().to_string();
         let now = Utc::now();
@@ -219,6 +232,7 @@ impl Gateway {
             .arg(listener_port.to_string())
             .stdout(Stdio::null())
             .stderr(Stdio::null());
+        append_obscura_launch_args(&mut command, effective_stealth, effective_identity.as_ref());
         if let Some(proxy_url) = &resolved_proxy_url {
             command.arg("--proxy").arg(proxy_url);
         }
@@ -254,6 +268,7 @@ impl Gateway {
             absolute_deadline: now + Duration::seconds(config.absolute_ttl_secs),
             cdp_ws_url: Some(local_ws_url.clone()),
             child_pid: Some(child_pid),
+            stealth: effective_stealth,
             proxy_policy: resolved_proxy_policy,
             allowed_domains: request.allowed_domains,
             denied_domains: request.denied_domains,
@@ -271,7 +286,11 @@ impl Gateway {
                 target_id: None,
             },
         );
-        self.emit_event(&session_id, "session.created", "session launched")?;
+        self.emit_event(
+            &session_id,
+            "session.created",
+            &format!("session launched (stealth={effective_stealth})"),
+        )?;
 
         if let Some(profile_id) = &request.profile_id {
             let cookies = self.export_profile_cookies(profile_id).await?;
@@ -362,7 +381,7 @@ impl Gateway {
             .await?;
         let runtime = self.get_runtime(session_id).await?;
         let target_id = self.ensure_target(session_id).await?;
-        let identity = self.profile_identity_for_session(session_id)?;
+        let identity = self.effective_identity_for_session(session_id).await?;
         let mut cdp = self
             .attach_to_target(&runtime.local_ws_url, &target_id, identity.as_ref())
             .await?;
@@ -406,7 +425,7 @@ impl Gateway {
     ) -> Result<EvaluateSessionResponse> {
         let runtime = self.get_runtime(session_id).await?;
         let target_id = self.ensure_target(session_id).await?;
-        let identity = self.profile_identity_for_session(session_id)?;
+        let identity = self.effective_identity_for_session(session_id).await?;
         let mut cdp = self
             .attach_to_target(&runtime.local_ws_url, &target_id, identity.as_ref())
             .await?;
@@ -433,7 +452,7 @@ impl Gateway {
     ) -> Result<DumpSessionResponse> {
         let runtime = self.get_runtime(session_id).await?;
         let target_id = self.ensure_target(session_id).await?;
-        let identity = self.profile_identity_for_session(session_id)?;
+        let identity = self.effective_identity_for_session(session_id).await?;
         let mut cdp = self
             .attach_to_target(&runtime.local_ws_url, &target_id, identity.as_ref())
             .await?;
@@ -696,8 +715,30 @@ impl Gateway {
                 .await;
         }
 
-        // Obscura does not currently expose stable CDP emulation primitives for timezone or
-        // viewport/screen overrides, so these fields are persisted but not enforced here.
+        if let Some(timezone_id) = &identity.timezone {
+            let _ = cdp
+                .request(
+                    "Emulation.setTimezoneOverride",
+                    Some(serde_json::json!({ "timezoneId": timezone_id })),
+                )
+                .await;
+        }
+
+        if let Some(viewport) = &identity.viewport {
+            let _ = cdp
+                .request(
+                    "Emulation.setDeviceMetricsOverride",
+                    Some(serde_json::json!({
+                        "width": viewport.width,
+                        "height": viewport.height,
+                        "deviceScaleFactor": 1,
+                        "mobile": false,
+                        "screenWidth": viewport.screen_width.unwrap_or(viewport.width),
+                        "screenHeight": viewport.screen_height.unwrap_or(viewport.height)
+                    })),
+                )
+                .await;
+        }
         Ok(())
     }
 
@@ -792,12 +833,19 @@ impl Gateway {
         Ok(cdp)
     }
 
-    fn profile_identity_for_session(&self, session_id: &str) -> Result<Option<ProfileIdentity>> {
+    async fn effective_identity_for_session(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<ProfileIdentity>> {
+        let config = self.config.read().await.clone();
         let session = self.db.get_session(session_id)?;
-        match session.profile_id {
-            Some(profile_id) => Ok(Some(self.db.get_profile(&profile_id)?.identity)),
-            None => Ok(None),
-        }
+        Ok(match session.profile_id {
+            Some(profile_id) => {
+                let profile = self.db.get_profile(&profile_id)?;
+                resolve_effective_identity(Some(&profile.identity), config.default_stealth)
+            }
+            None => None,
+        })
     }
 
     async fn ensure_navigation_allowed(&self, session_id: &str, url: &str) -> Result<()> {
@@ -893,6 +941,78 @@ fn normalize_domain_rule(rule: &str) -> String {
             .to_ascii_lowercase();
     }
     trimmed
+}
+
+fn resolve_stealth(
+    session_stealth: Option<bool>,
+    profile_identity: Option<&ProfileIdentity>,
+    default_stealth: bool,
+) -> bool {
+    session_stealth
+        .or_else(|| profile_identity.and_then(|identity| identity.stealth))
+        .unwrap_or(default_stealth)
+}
+
+fn resolve_effective_identity(
+    profile_identity: Option<&ProfileIdentity>,
+    default_stealth: bool,
+) -> Option<ProfileIdentity> {
+    profile_identity.map(|identity| {
+        let defaults = default_macos_chrome_identity(default_stealth);
+        ProfileIdentity {
+            stealth: identity.stealth.or(defaults.stealth),
+            user_agent: identity.user_agent.clone().or(defaults.user_agent),
+            accept_language: identity
+                .accept_language
+                .clone()
+                .or(defaults.accept_language),
+            timezone: identity.timezone.clone().or(defaults.timezone),
+            viewport: identity.viewport.clone().or(defaults.viewport),
+            proxy_affinity: identity.proxy_affinity.clone(),
+        }
+    })
+}
+
+fn default_macos_chrome_identity(default_stealth: bool) -> ProfileIdentity {
+    ProfileIdentity {
+        stealth: Some(default_stealth),
+        user_agent: Some(DEFAULT_MACOS_CHROME_145_UA.to_string()),
+        accept_language: Some(DEFAULT_ACCEPT_LANGUAGE.to_string()),
+        timezone: Some(DEFAULT_TIMEZONE.to_string()),
+        viewport: Some(ViewportConfig {
+            width: DEFAULT_VIEWPORT_WIDTH,
+            height: DEFAULT_VIEWPORT_HEIGHT,
+            screen_width: Some(DEFAULT_VIEWPORT_WIDTH),
+            screen_height: Some(DEFAULT_VIEWPORT_HEIGHT),
+        }),
+        proxy_affinity: None,
+    }
+}
+
+fn append_obscura_launch_args(
+    command: &mut Command,
+    stealth: bool,
+    identity: Option<&ProfileIdentity>,
+) {
+    if stealth {
+        command.arg("--stealth");
+    }
+    if let Some(user_agent) = identity.and_then(|identity| identity.user_agent.as_ref()) {
+        command.arg("--user-agent").arg(user_agent);
+    }
+}
+
+#[cfg(test)]
+fn obscura_launch_args(stealth: bool, identity: Option<&ProfileIdentity>) -> Vec<String> {
+    let mut args = Vec::new();
+    if stealth {
+        args.push("--stealth".to_string());
+    }
+    if let Some(user_agent) = identity.and_then(|identity| identity.user_agent.as_ref()) {
+        args.push("--user-agent".to_string());
+        args.push(user_agent.clone());
+    }
+    args
 }
 
 async fn wait_for_cdp_endpoint(ws_url: &str, timeout_secs: u64) -> Result<()> {
@@ -1041,5 +1161,46 @@ mod tests {
         ));
         assert!(!domain_matches("badexample.com", "example.com"));
         assert!(!domain_matches("example.org", "example.com"));
+    }
+
+    #[test]
+    fn stealth_resolution_prefers_session_then_profile_then_config() {
+        let profile = ProfileIdentity {
+            stealth: Some(false),
+            ..ProfileIdentity::default()
+        };
+        assert!(resolve_stealth(Some(true), Some(&profile), false));
+        assert!(!resolve_stealth(None, Some(&profile), true));
+        assert!(resolve_stealth(None, None, true));
+    }
+
+    #[test]
+    fn profile_identity_fills_missing_macos_chrome_defaults() {
+        let profile = ProfileIdentity {
+            accept_language: Some("de-DE,de;q=0.9".into()),
+            ..ProfileIdentity::default()
+        };
+        let resolved = resolve_effective_identity(Some(&profile), true).unwrap();
+        assert_eq!(
+            resolved.user_agent.as_deref(),
+            Some(DEFAULT_MACOS_CHROME_145_UA)
+        );
+        assert_eq!(resolved.accept_language.as_deref(), Some("de-DE,de;q=0.9"));
+        assert_eq!(resolved.timezone.as_deref(), Some(DEFAULT_TIMEZONE));
+        assert_eq!(resolved.viewport.unwrap().width, DEFAULT_VIEWPORT_WIDTH);
+        assert_eq!(resolved.stealth, Some(true));
+    }
+
+    #[test]
+    fn launch_args_include_stealth_and_user_agent() {
+        let identity = ProfileIdentity {
+            user_agent: Some("ua".into()),
+            ..ProfileIdentity::default()
+        };
+        assert_eq!(
+            obscura_launch_args(true, Some(&identity)),
+            vec!["--stealth", "--user-agent", "ua"]
+        );
+        assert!(obscura_launch_args(false, None).is_empty());
     }
 }

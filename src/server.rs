@@ -153,6 +153,7 @@ async fn status(
     Ok(Json(ServerStatusResponse {
         listen_addr: config.listen_addr,
         obscura_bin,
+        default_stealth: config.default_stealth,
         default_proxy_policy: config.default_proxy_policy,
         proxy_policies: config.proxy_policies.len(),
         saved_profiles,

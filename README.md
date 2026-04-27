@@ -202,6 +202,12 @@ Set a default proxy policy:
 obscura-cli config set-default-proxy-policy direct
 ```
 
+Set the default upstream Obscura stealth mode:
+
+```bash
+obscura-cli config set-default-stealth true
+```
+
 `server_url` is the URL the CLI calls and the base used for CDP grant URLs. `listen_addr` is only used by the gateway server when it binds a socket.
 
 ## Usage
@@ -242,6 +248,13 @@ Create a session with a proxy policy:
 obscura-cli session create --proxy-policy <policy_name>
 ```
 
+Stealth is enabled by default and launches upstream Obscura with `--stealth`. Override it per session when needed:
+
+```bash
+obscura-cli session create --no-stealth
+obscura-cli session create --stealth
+```
+
 Sessions are intentionally ephemeral. If the gateway restarts, previously active sessions are marked `failed`; create a new session after restart.
 
 ### Profiles
@@ -263,8 +276,11 @@ obscura-cli profile create research \
   --accept-language "en-US,en;q=0.9" \
   --timezone "Europe/Helsinki" \
   --viewport-width 1440 \
-  --viewport-height 900
+  --viewport-height 900 \
+  --stealth
 ```
+
+Profiles can use `--stealth` or `--no-stealth` as a tri-state override. If neither is set, profile sessions inherit the gateway default. Profile sessions fill missing identity fields with a Chrome 145 on macOS default fingerprint and pass the effective user agent to `obscura serve --user-agent`.
 
 Use a profile in read-only mode:
 

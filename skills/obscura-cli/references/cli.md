@@ -41,6 +41,12 @@ Show current config:
 obscura-cli config show
 ```
 
+Set default stealth mode for new sessions:
+
+```bash
+obscura-cli config set-default-stealth true
+```
+
 For local development from source:
 
 ```bash
@@ -66,6 +72,13 @@ obscura-cli session dump <session_id> --format html
 obscura-cli session dump <session_id> --format text
 obscura-cli session dump <session_id> --format links
 obscura-cli session close <session_id>
+```
+
+Stealth is enabled by default. Override it per session when needed:
+
+```bash
+obscura-cli session create --no-stealth
+obscura-cli session create --stealth
 ```
 
 Supported dump formats:

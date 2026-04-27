@@ -16,6 +16,7 @@ Use `obscura-cli` as the normal client binary. The gateway binary should be used
 - Artifacts: `~/.obscura-gateway/artifacts/`
 - Default listen address: `127.0.0.1:18789`
 - Default server URL: `http://127.0.0.1:18789`
+- Default stealth: `true`
 
 Docker uses `HOME=/data` and stores state at `/data/.obscura-gateway`.
 
@@ -92,6 +93,14 @@ Useful server endpoints:
 - `GET /v1/sessions`
 - `POST /v1/sessions`
 - `GET /v1/profiles`
+
+## Fingerprint And Stealth
+
+- New sessions inherit `default_stealth=true` unless a session or profile override is provided.
+- When stealth is effective, the gateway launches child Obscura with `--stealth`.
+- Profile sessions fill missing identity fields with a Chrome 145 on macOS default fingerprint.
+- Effective profile user agents are passed to `obscura serve --user-agent`.
+- Existing pre-stealth `gateway.db` state is not migrated automatically; recreate state for this hard-cut schema.
 
 ## Release Packaging
 

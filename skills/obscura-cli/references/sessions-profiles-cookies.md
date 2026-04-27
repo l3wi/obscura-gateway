@@ -49,8 +49,17 @@ obscura-cli profile create research \
   --timezone "Europe/Helsinki" \
   --viewport-width 1440 \
   --viewport-height 900 \
-  --proxy-affinity <policy_name>
+  --proxy-affinity <policy_name> \
+  --stealth
 ```
+
+Profile stealth is tri-state:
+
+- Omit both flags to inherit the gateway default.
+- Use `--stealth` to force upstream Obscura stealth mode for that profile.
+- Use `--no-stealth` to disable upstream Obscura stealth mode for that profile.
+- Profile sessions fill missing identity fields with a Chrome 145 on macOS default fingerprint.
+- The effective profile user agent is passed to `obscura serve --user-agent` and reinforced through CDP.
 
 Use read-only mode when cookies must not be saved back:
 
@@ -71,7 +80,7 @@ Profile rules:
 - Do not import cookies while the profile has active sessions.
 - Do not delete a profile while active sessions are attached.
 - Close read-write sessions cleanly so cookies can be fetched and persisted.
-- Some profile identity fields may be stored for consistency or future support even when not fully enforced at runtime.
+- Timezone and viewport identity fields are applied through CDP emulation on attach.
 
 ## Cookies
 

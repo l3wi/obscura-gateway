@@ -72,6 +72,9 @@ enum ConfigSubcommand {
     SetDefaultProxyPolicy {
         value: String,
     },
+    SetDefaultStealth {
+        value: bool,
+    },
     UpsertProxyPolicy {
         name: String,
         scheme: String,
@@ -113,6 +116,10 @@ enum SessionSubcommand {
         denied_domains: Vec<String>,
         #[arg(long)]
         proxy_policy: Option<String>,
+        #[arg(long, conflicts_with = "no_stealth")]
+        stealth: bool,
+        #[arg(long = "no-stealth")]
+        no_stealth: bool,
     },
     List,
     Show {
@@ -168,6 +175,10 @@ enum ProfileSubcommand {
         screen_height: Option<u32>,
         #[arg(long)]
         proxy_affinity: Option<String>,
+        #[arg(long, conflicts_with = "no_stealth")]
+        stealth: bool,
+        #[arg(long = "no-stealth")]
+        no_stealth: bool,
     },
     List,
     Show {
@@ -193,6 +204,10 @@ enum ProfileSubcommand {
         screen_height: Option<u32>,
         #[arg(long)]
         proxy_affinity: Option<String>,
+        #[arg(long, conflicts_with = "no_stealth")]
+        stealth: bool,
+        #[arg(long = "no-stealth")]
+        no_stealth: bool,
     },
     Delete {
         id: String,
@@ -343,6 +358,10 @@ async fn handle_remote_command(
                     rewrite_config_file(paths, |cfg| cfg.set_default_proxy_policy(value.clone()))?;
                 print_json(&updated);
             }
+            ConfigSubcommand::SetDefaultStealth { value } => {
+                let updated = rewrite_config_file(paths, |cfg| cfg.set_default_stealth(value))?;
+                print_json(&updated);
+            }
             ConfigSubcommand::UpsertProxyPolicy {
                 name,
                 scheme,
@@ -385,6 +404,8 @@ async fn handle_remote_command(
                 allowed_domains,
                 denied_domains,
                 proxy_policy,
+                stealth,
+                no_stealth,
             } => {
                 let response = client
                     .post(api_url(config, "/v1/sessions"))
@@ -393,6 +414,7 @@ async fn handle_remote_command(
                         tenant_id,
                         profile_id: profile,
                         profile_mode: Some(parse_profile_mode(&profile_mode)?),
+                        stealth: stealth_override(stealth, no_stealth),
                         allowed_domains,
                         denied_domains,
                         proxy_policy,
@@ -488,6 +510,8 @@ async fn handle_remote_command(
                 screen_width,
                 screen_height,
                 proxy_affinity,
+                stealth,
+                no_stealth,
             } => {
                 let response = client
                     .post(api_url(config, "/v1/profiles"))
@@ -504,6 +528,7 @@ async fn handle_remote_command(
                             screen_width,
                             screen_height,
                             proxy_affinity,
+                            stealth_override(stealth, no_stealth),
                         )?,
                     })
                     .send()
@@ -528,6 +553,8 @@ async fn handle_remote_command(
                 screen_width,
                 screen_height,
                 proxy_affinity,
+                stealth,
+                no_stealth,
             } => {
                 let response = client
                     .patch(format!("{}/v1/profiles/{id}", api_base(config)))
@@ -543,6 +570,7 @@ async fn handle_remote_command(
                             screen_width,
                             screen_height,
                             proxy_affinity,
+                            stealth_override(stealth, no_stealth),
                         )?,
                     })
                     .send()
@@ -694,6 +722,7 @@ async fn collect_status(
         let server = ServerStatusResponse {
             listen_addr: config.listen_addr.clone(),
             obscura_bin: config.obscura_bin.display().to_string(),
+            default_stealth: config.default_stealth,
             default_proxy_policy: config.default_proxy_policy.clone(),
             proxy_policies: config.proxy_policies.len(),
             saved_profiles: db.profiles_count()?,
@@ -794,6 +823,14 @@ fn parse_profile_mode(value: &str) -> Result<ProfileMode> {
     }
 }
 
+fn stealth_override(stealth: bool, no_stealth: bool) -> Option<bool> {
+    match (stealth, no_stealth) {
+        (true, false) => Some(true),
+        (false, true) => Some(false),
+        _ => None,
+    }
+}
+
 fn build_profile_identity(
     user_agent: Option<String>,
     accept_language: Option<String>,
@@ -803,6 +840,7 @@ fn build_profile_identity(
     screen_width: Option<u32>,
     screen_height: Option<u32>,
     proxy_affinity: Option<String>,
+    stealth: Option<bool>,
 ) -> Result<ProfileIdentity> {
     let viewport = match (viewport_width, viewport_height) {
         (Some(width), Some(height)) => Some(ViewportConfig {
@@ -820,6 +858,7 @@ fn build_profile_identity(
     }
 
     Ok(ProfileIdentity {
+        stealth,
         user_agent,
         accept_language,
         timezone,
@@ -837,6 +876,7 @@ fn build_optional_profile_identity(
     screen_width: Option<u32>,
     screen_height: Option<u32>,
     proxy_affinity: Option<String>,
+    stealth: Option<bool>,
 ) -> Result<Option<ProfileIdentity>> {
     if user_agent.is_none()
         && accept_language.is_none()
@@ -846,6 +886,7 @@ fn build_optional_profile_identity(
         && screen_width.is_none()
         && screen_height.is_none()
         && proxy_affinity.is_none()
+        && stealth.is_none()
     {
         return Ok(None);
     }
@@ -858,6 +899,7 @@ fn build_optional_profile_identity(
         screen_width,
         screen_height,
         proxy_affinity,
+        stealth,
     )?))
 }
 
@@ -915,8 +957,16 @@ mod tests {
     #[test]
     fn profile_identity_builder_requires_complete_viewport() {
         assert!(
-            build_profile_identity(None, None, None, Some(100), None, None, None, None).is_err()
+            build_profile_identity(None, None, None, Some(100), None, None, None, None, None)
+                .is_err()
         );
+    }
+
+    #[test]
+    fn stealth_override_maps_flags() {
+        assert_eq!(stealth_override(true, false), Some(true));
+        assert_eq!(stealth_override(false, true), Some(false));
+        assert_eq!(stealth_override(false, false), None);
     }
 
     #[test]
