@@ -1,4 +1,4 @@
-# CDP, Proxies, And Troubleshooting
+# CLI CDP, Proxies, And Troubleshooting
 
 ## CDP Grants
 
@@ -44,12 +44,12 @@ obscura-cli status
 obscura-cli quotas
 obscura-cli session list
 obscura-cli profile list
+obscura-cli config show
 ```
 
 Common failures:
 
-- Gateway responds to `healthz` but work fails: `healthz` only proves the HTTP server is up; check `status`, quotas, and session state.
-- CLI cannot connect: verify `server_url`, `api_key`, and whether the gateway is actually listening on `listen_addr`.
+- CLI cannot connect: verify `server_url`, `api_key`, and whether the gateway is actually listening.
 - CDP grant cannot connect: confirm `server_url` is externally reachable and has the right HTTP/HTTPS scheme for generated WS/WSS grants.
 - Session fails after restart: stored rows are not live browser runtimes; create a new session.
 - Cookie import fails: ensure the profile exists, the cookie file parses, and no active session is attached to the profile.
@@ -59,5 +59,4 @@ Common failures:
 Debugging guidance:
 
 - Reproduce with the CLI before changing code.
-- Inspect server code/logs when the API only returns a bare status code.
-- Check `git status --short --branch` before edits; this repo may have local smoke tests or uncommitted work.
+- If the API only returns a bare status code, inspect gateway server logs/code with the `obscura-gateway` skill.

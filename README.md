@@ -20,7 +20,7 @@ The package ships two distinct binaries:
 - Server status, quotas, session events, artifacts, and OpenAPI JSON.
 - Docker image that bundles the pinned upstream Obscura release binary.
 - First-class `obscura-cli` release artifact for direct download and install.
-- Agent Skill metadata under `skills/obscura-gateway` for Agent Skills-compatible clients.
+- Agent Skill metadata under `skills/obscura-gateway` and `skills/obscura-cli` for Agent Skills-compatible clients.
 
 ## Gateway Server
 
@@ -328,21 +328,26 @@ The response contains a temporary `ws://` or `wss://` URL. Grants are single-use
 
 Prefer `session navigate`, `session eval`, and `session dump` unless a tool specifically needs raw CDP.
 
-## Agent Skill
+## Agent Skills
 
-This repository includes an Agent Skills-compatible skill:
+This repository includes two Agent Skills-compatible skills:
 
 ```text
 skills/obscura-gateway/
+skills/obscura-cli/
 ```
 
-List it with:
+Use `obscura-gateway` for server operations, Docker, gateway configuration, API behavior, release packaging, and server troubleshooting.
+
+Use `obscura-cli` for client install/configuration, sessions, profiles, cookies, CDP grants, proxy policies, and browser automation command examples.
+
+List available skills with:
 
 ```bash
 bunx skills add . --list
 ```
 
-Install it with the Agent Skills CLI supported by your agent environment.
+Install them with the Agent Skills CLI supported by your agent environment.
 
 ## Development
 

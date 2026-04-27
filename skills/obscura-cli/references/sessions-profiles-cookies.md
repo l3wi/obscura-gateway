@@ -23,9 +23,9 @@ obscura-cli session create --proxy-policy <policy_name>
 
 Rules:
 
-- Session IDs refer to live in-memory runtimes.
+- Session IDs refer to live gateway runtimes.
 - Persisted DB rows alone cannot revive a browser after gateway restart.
-- On startup, previously active sessions are marked `failed`.
+- On gateway startup, previously active sessions are marked `failed`.
 - `session navigate` enforces default and session domain allow/deny policies.
 - Max concurrent sessions is exposed by `quotas`; avoid creating above that limit.
 

@@ -1,15 +1,17 @@
 ---
 name: obscura-gateway
-description: "Use this skill when a task involves obscura-gateway browser automation or operations: starting or configuring the gateway, using the CLI/API, creating ephemeral browser sessions, managing persistent profiles, importing or exporting cookies, issuing CDP grants, setting proxy/domain policies, running smoke tests, or troubleshooting session/profile/cookie failures."
+description: "Use this skill when a task involves operating or changing the Obscura Gateway server: deploying or running the gateway, Dockerizing it, configuring listen/server URLs, API keys, Obscura binary paths, state directories, API behavior, child Obscura process lifecycle, server-side quotas, release packaging, or gateway/server troubleshooting. Do not use this for routine obscura-cli session/profile/cookie commands unless server behavior is being debugged."
 ---
 
 # Obscura Gateway
 
 ## Use This Skill For
 
-Obscura Gateway is a control plane around the `obscura` browser binary. It gives agents short-lived browser sessions, optional persistent profiles, cookie import/export, domain controls, proxy policies, and one-time CDP WebSocket grants.
+Obscura Gateway is the long-running control plane around the `obscura` browser binary. It owns state, exposes the HTTP API, enforces policy, and starts/stops short-lived `obscura serve` child processes.
 
-Use the gateway primitives rather than ad-hoc browser automation when the user needs controlled browsing, repeatable session lifecycle, logged-in profile state, cookie handling, proxy selection, or raw CDP access.
+Use this skill when the task is about the server process, deployment, Docker image, HTTP API, state files, process lifecycle, or release packaging.
+
+For day-to-day client workflows such as `obscura-cli session create`, profile management, cookie import/export, and CDP grant commands, use the `obscura-cli` skill instead.
 
 ## Fast Start
 
@@ -20,43 +22,37 @@ cargo run --bin obscura-gateway -- setup
 cargo run --bin obscura-gateway -- run
 ```
 
-In another shell:
+Docker gateway:
 
 ```bash
-obscura-cli status
-obscura-cli quotas
-obscura-cli session create
-obscura-cli session navigate <session_id> https://example.com/
-obscura-cli session eval <session_id> "document.title"
-obscura-cli session dump <session_id> --format text
-obscura-cli session close <session_id>
+docker compose up --build
+docker compose exec obscura-gateway sh -c "awk -F'\"' '/^api_key =/{print \$2}' /data/.obscura-gateway/config.toml"
 ```
 
-From source, replace `obscura-cli` with `cargo run --bin obscura-cli --`.
+Default local API: `http://127.0.0.1:18789`.
 
-Always close sessions when finished. Sessions are ephemeral and backed by live child `obscura` processes.
+Always verify `obscura` is installed or configured before diagnosing gateway failures.
 
-## Choose The Right Primitive
+## Server Rules
 
-- Use an ephemeral session for stateless browsing, page inspection, and one-off automation.
-- Use a profile when the task needs persistent identity or cookies across sessions.
-- Use cookie import/export when the user provides browser state or needs a reusable artifact.
-- Use a CDP grant only when an external agent/tool needs temporary raw WebSocket access.
-- Use proxy policies when location, egress, or traffic separation matters.
+- `listen_addr` is where the gateway binds.
+- `server_url` is what clients call and what CDP grants use for public URLs.
+- `api_key` protects `/v1` routes with bearer auth.
+- Local state defaults to `~/.obscura-gateway`.
+- Docker state lives at `/data/.obscura-gateway`.
+- Active sessions are live child processes; persisted DB rows cannot recover them after restart.
+- A gateway restart marks previously active sessions `failed`.
+- Child CDP ports stay on loopback and are proxied or granted by the gateway.
 
 ## Reference Files
 
 Read only the reference that matches the task:
 
-- [CLI and operations](references/cli.md): setup, run, remote CLI config, status, quotas, tests, and live smoke commands.
-- [Sessions, profiles, and cookies](references/sessions-profiles-cookies.md): lifecycle rules, profile modes, identity fields, cookie formats, and persistence gotchas.
-- [CDP, proxies, and troubleshooting](references/cdp-proxy-troubleshooting.md): grants, proxy policy commands, stale sessions, failures, and diagnostic workflow.
+- [Gateway operations](references/gateway-operations.md): setup, Docker, runtime configuration, state layout, API/auth, releases, and tests.
+- [Gateway troubleshooting](references/gateway-troubleshooting.md): stale sessions, Obscura binary failures, proxy/CDP server issues, and diagnostic workflow.
 
-## Core Rules
+## Validation
 
-- `server_url` is what CLI clients call and what CDP grants use for public URLs.
-- `listen_addr` is where the gateway binds; changing `server_url` alone does not move the listener.
-- Stored sessions are history plus status, not recoverable browser runtimes.
-- A gateway restart marks previously active sessions failed; create new sessions after restart.
-- Prefer `session navigate`, `session eval`, and `session dump` over raw CDP unless raw CDP is required.
 - Run `cargo test` after changing gateway code.
+- Run `cargo build --release --locked --bins` after changing release packaging or binary layout.
+- Run `docker build -t obscura-gateway:local .` after changing Docker files.
