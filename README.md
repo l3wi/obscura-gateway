@@ -4,6 +4,11 @@ Obscura Gateway is a control plane and CLI for running short-lived [Obscura](htt
 
 The gateway runs an HTTP API, stores state in SQLite, and spawns `obscura serve` child processes for active sessions. Child CDP ports stay on loopback and are accessed through gateway actions or one-time CDP grants.
 
+The package has two distinct roles:
+
+- **Gateway server**: the long-running service that owns state, starts/stops Obscura child processes, enforces policy, and exposes the HTTP API.
+- **CLI client**: the command-line interface used to configure a local or remote gateway and call the API for sessions, profiles, cookies, grants, and diagnostics.
+
 ## Features
 
 - Ephemeral browser sessions with explicit create, navigate, evaluate, dump, and close operations.
@@ -16,17 +21,21 @@ The gateway runs an HTTP API, stores state in SQLite, and spawns `obscura serve`
 - Docker image that bundles the pinned upstream Obscura release binary.
 - Agent Skill metadata under `skills/obscura-gateway` for Agent Skills-compatible clients.
 
-## Quickstart
+## Gateway Server
 
-### Docker
+The gateway server is the process you deploy. It stores profiles/cookies/session history in `~/.obscura-gateway` by default, listens on `listen_addr`, and requires API-key auth for `/v1` routes. Every active browser session is an `obscura serve` child process owned by the gateway.
 
-Docker is the easiest way to run the gateway because the image downloads and includes the pinned Obscura release binary.
+### Gateway Quickstart: Docker
+
+Docker is the easiest way to run the gateway server because the image downloads and includes the pinned Obscura release binary.
+
+Start the server:
 
 ```bash
 docker compose up --build
 ```
 
-The compose file exposes the gateway at:
+The compose file exposes the gateway server at:
 
 ```text
 http://localhost:18789
@@ -40,7 +49,7 @@ docker compose exec obscura-gateway sh -c "awk -F'\"' '/^api_key =/{print \$2}' 
 
 See [DOCKER.md](DOCKER.md) for image build arguments, runtime environment variables, and reverse-proxy notes.
 
-### From Source
+### Gateway Quickstart: From Source
 
 Prerequisites:
 
@@ -59,16 +68,37 @@ Run the gateway:
 cargo run -- run
 ```
 
-In another shell:
+The source run mode uses the same config file as the CLI. By default it binds `127.0.0.1:18789`; change `listen_addr` in `~/.obscura-gateway/config.toml` if you need a different bind address.
 
-```bash
-cargo run -- status
-cargo run -- quotas
+### Gateway API
+
+The gateway exposes JSON API routes under `/v1` and OpenAPI at:
+
+```text
+/openapi.json
 ```
 
-## Usage
+All `/v1` routes require:
 
-### Configuration
+```http
+Authorization: Bearer <api_key>
+```
+
+Useful endpoints:
+
+- `GET /healthz`
+- `GET /v1/status`
+- `GET /v1/quotas`
+- `POST /v1/sessions`
+- `POST /v1/sessions/{id}/actions/navigate`
+- `POST /v1/sessions/{id}/actions/eval`
+- `POST /v1/sessions/{id}/actions/dump`
+- `POST /v1/sessions/{id}/grants/cdp`
+- `GET /v1/profiles`
+- `POST /v1/profiles/{id}/cookies:import`
+- `GET /v1/profiles/{id}/cookies:export`
+
+### Gateway State
 
 The default state root is `~/.obscura-gateway`.
 
@@ -80,11 +110,61 @@ Important files and directories:
 - `~/.obscura-gateway/profiles/`
 - `~/.obscura-gateway/artifacts/`
 
+In Docker, state lives in `/data/.obscura-gateway` and should be mounted as a persistent volume.
+
+## CLI Client
+
+The CLI is a client for the gateway API. It can also bootstrap local config with `setup` and start a local gateway with `run`, but day-to-day CLI commands send authenticated HTTP requests to the configured `server_url`.
+
+The same binary provides both roles:
+
+- `obscura-gateway run` starts the gateway server.
+- `obscura-gateway session ...`, `profile ...`, `cookies ...`, `grant ...`, `status`, and `quotas` act as CLI client commands.
+
+When developing from source, replace `obscura-gateway` with `cargo run --`.
+
+### CLI Quickstart: Local Gateway
+
+Start the gateway server in one shell:
+
+```bash
+cargo run -- run
+```
+
+Use the CLI from another shell:
+
+```bash
+cargo run -- status
+cargo run -- quotas
+cargo run -- session create
+cargo run -- session navigate <session_id> https://example.com/
+cargo run -- session eval <session_id> "document.title"
+cargo run -- session dump <session_id> --format text
+cargo run -- session close <session_id>
+```
+
+### CLI Quickstart: Remote Gateway
+
 Point the CLI at a remote gateway:
 
 ```bash
 cargo run -- config set-server-url https://gw.example.com
 cargo run -- config set-api-key <gateway_api_key>
+```
+
+Verify connectivity:
+
+```bash
+cargo run -- status
+cargo run -- quotas
+```
+
+### CLI Configuration
+
+Show current config:
+
+```bash
+cargo run -- config show
 ```
 
 Configure the Obscura binary path:
@@ -93,11 +173,15 @@ Configure the Obscura binary path:
 cargo run -- config set-obscura-bin /usr/local/bin/obscura
 ```
 
-Show current config:
+Set a default proxy policy:
 
 ```bash
-cargo run -- config show
+cargo run -- config set-default-proxy-policy direct
 ```
+
+`server_url` is the URL the CLI calls and the base used for CDP grant URLs. `listen_addr` is only used by the gateway server when it binds a socket.
+
+## Usage
 
 ### Sessions
 
@@ -220,34 +304,6 @@ cargo run -- grant cdp <session_id>
 The response contains a temporary `ws://` or `wss://` URL. Grants are single-use and expire according to `connect_ttl_secs`.
 
 Prefer `session navigate`, `session eval`, and `session dump` unless a tool specifically needs raw CDP.
-
-### HTTP API
-
-The gateway exposes JSON API routes under `/v1` and OpenAPI at:
-
-```text
-/openapi.json
-```
-
-All `/v1` routes require:
-
-```http
-Authorization: Bearer <api_key>
-```
-
-Useful endpoints:
-
-- `GET /healthz`
-- `GET /v1/status`
-- `GET /v1/quotas`
-- `POST /v1/sessions`
-- `POST /v1/sessions/{id}/actions/navigate`
-- `POST /v1/sessions/{id}/actions/eval`
-- `POST /v1/sessions/{id}/actions/dump`
-- `POST /v1/sessions/{id}/grants/cdp`
-- `GET /v1/profiles`
-- `POST /v1/profiles/{id}/cookies:import`
-- `GET /v1/profiles/{id}/cookies:export`
 
 ## Agent Skill
 
