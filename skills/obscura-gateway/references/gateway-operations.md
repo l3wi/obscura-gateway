@@ -100,7 +100,6 @@ Useful server endpoints:
 - When stealth is effective, the gateway launches child Obscura with `--stealth`.
 - Profile sessions fill missing identity fields with a Chrome 145 on macOS default fingerprint.
 - Effective profile user agents are passed to `obscura serve --user-agent`.
-- Existing pre-stealth `gateway.db` state is not migrated automatically; recreate state for this hard-cut schema.
 
 ## Release Packaging
 
